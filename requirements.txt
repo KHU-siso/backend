@@ -1,0 +1,14 @@
+fastapi
+uvicorn[standard]
+email-validator
+sqlalchemy
+psycopg2-binary
+pydantic-settings
+pyjwt
+bcrypt
+pypdf
+langchain-text-splitters
+anthropic
+python-multipart
+sentence-transformers
+chromadb
