@@ -23,6 +23,8 @@ from app.deps import get_current_user, get_db
 from app.models import ChatConversation, Document, User
 # app/schemas.py: 응답 형태를 정의하는 Pydantic 모델들
 from app.schemas import ConversationOut, DashboardOut, DocumentOut, UserOut
+# services/coin_service.py: 마감 지난 미완료 항목이 있으면 캐릭터 기분을 "sad"로 갱신
+from app.services.coin_service import update_mood_on_incomplete
 
 # 이 라우터의 모든 엔드포인트는 "/api/dashboard"로 시작한다.
 router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
@@ -33,10 +35,16 @@ router = APIRouter(prefix="/api/dashboard", tags=["dashboard"])
 #   current_user: User = Depends(get_current_user) → 로그인된 유저를 자동으로 가져옴 (없으면 401 에러)
 #   db: Session = Depends(get_db) → 이번 요청 전용 DB 세션
 # 무슨 기능을 하나: 이 유저가 올린 문서 개수, 만든 대화방 개수, 그리고 각각 최근 5개씩을
-#   조회해서 하나의 DashboardOut으로 합쳐 반환한다.
+#   조회해서 하나의 DashboardOut으로 합쳐 반환한다. 그 전에 update_mood_on_incomplete로
+#   마감 지난 과제나 미완료 알림이 있는지 확인해서, 있으면 캐릭터 기분을 "sad"로 갱신해둔다
+#   (대시보드를 열 때마다 캐릭터 상태가 최신으로 맞춰지도록 하는 부수 효과).
 # 언제 쓰이나: 프론트엔드 앱을 켜서 로그인 후 대시보드 화면으로 이동했을 때 호출된다.
 @router.get("", response_model=DashboardOut)
 def get_dashboard(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    # 응답 자체에는 반영되지 않는 부수 효과(side effect)다 — DashboardOut에 캐릭터 정보를
+    # 담지는 않지만, 이후 GET /api/character를 호출했을 때 최신 기분이 보이도록 미리 갱신해둔다.
+    update_mood_on_incomplete(current_user.id, db)
+
     # db.query(func.count(Document.id)).filter(...).scalar():
     #   "SELECT COUNT(id) FROM documents WHERE user_id = 현재유저id"와 같은 효과.
     #   .scalar()는 결과가 표 형태(row)가 아니라 숫자 하나만 필요할 때 값 하나만 뽑아준다.

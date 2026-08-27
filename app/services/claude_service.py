@@ -81,3 +81,21 @@ def ask(question: str, history: list[dict], context_text: str | None) -> str:
     # 그중 block.type == "text"인 첫 번째 블록의 텍스트 내용만 꺼내서 반환한다.
     # 만약 텍스트 블록이 하나도 없다면(이례적인 경우) 빈 문자열("")을 대신 반환한다.
     return next((block.text for block in response.content if block.type == "text"), "")
+
+
+# complete: ask()와 달리 "대화 기록"이나 "이전 문맥" 없이, 시스템 프롬프트 하나와 사용자
+# 메시지 하나만으로 Claude를 한 번 호출하는 범용 함수.
+# 어디서 온 기능인가: ask()와 동일한 _client.messages.create를 재사용하지만, 대화 히스토리를
+#   쌓지 않는다는 점만 다르다.
+# 무슨 기능을 하나: "질문 하나 → 답 하나"로 끝나는, 챗봇이 아닌 작업(퀴즈 문제 생성, 주관식 채점처럼
+#   대화가 아니라 한 번의 요청-응답으로 충분한 작업)에 Claude를 재사용할 수 있게 해준다.
+# 언제 쓰이나: services/quiz_service.py의 generate_quiz_questions/grade_answer에서 호출된다.
+def complete(system_prompt: str, user_message: str, max_tokens: int = 4096) -> str:
+    response = _client.messages.create(
+        model=settings.claude_model,
+        max_tokens=max_tokens,
+        system=system_prompt,
+        output_config={"effort": "medium"},
+        messages=[{"role": "user", "content": user_message}],
+    )
+    return next((block.text for block in response.content if block.type == "text"), "")

@@ -36,7 +36,7 @@ from app.deps import get_current_user, get_db
 from app.models import User
 
 # app/schemas.py: Pydantic 모델. API 요청/응답 데이터의 "형태(스펙)"를 정의하고 자동 검증해줌
-#   - UserCreate: 회원가입 요청 body 형태 (email, password, name)
+#   - UserCreate: 회원가입 요청 body 형태 (email, password, nickname)
 #   - UserLogin: 로그인 요청 body 형태 (email, password)
 #   - TokenOut: 로그인/회원가입 성공 시 응답 형태 (토큰 + 유저 정보)
 #   - UserOut: 유저 정보를 외부에 보여줄 때의 형태 (비밀번호 해시 같은 민감정보는 제외됨)
@@ -62,7 +62,7 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 #   @router.post(...)는 FastAPI의 라우터 데코레이터로, "이 함수는 POST /api/auth/signup
 #   요청이 오면 실행된다"고 등록하는 역할.
 #   payload: UserCreate는 app/schemas.py의 Pydantic 모델로, 요청 body(JSON)의
-#   email/password/name 값을 FastAPI가 자동으로 읽고 검증해서 이 객체에 담아준다.
+#   email/password/nickname 값을 FastAPI가 자동으로 읽고 검증해서 이 객체에 담아준다.
 #   db: Session = Depends(get_db)는 FastAPI의 의존성 주입 기능으로, 요청이 들어올 때마다
 #   app/deps.py의 get_db()가 먼저 실행되어 새 DB 세션을 만들어 넣어준다.
 # - 무슨 기능을 하나: 이메일 중복 체크 → 비밀번호 해싱 → 새 유저 저장(DB) → 로그인 토큰 발급.
@@ -80,7 +80,7 @@ def signup(payload: UserCreate, db: Session = Depends(get_db)):
     # 새로운 User ORM 객체를 파이썬 메모리 상에서만 생성 (아직 DB에 저장된 건 아님)
     user = User(
         email=payload.email,
-        name=payload.name,
+        nickname=payload.nickname,
         # hash_password(payload.password): 평문 비밀번호를 그대로 저장하면 위험하므로,
         # bcrypt 알고리즘으로 되돌릴 수 없는 해시 문자열로 바꿔서 저장한다.
         # 나중에 로그인할 때는 이 해시와 입력값을 비교(verify_password)하는 방식으로 검증한다.

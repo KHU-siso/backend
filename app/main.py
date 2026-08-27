@@ -25,9 +25,9 @@ from fastapi.middleware.cors import CORSMiddleware
 #   지금까지 정의된 모든 테이블의 설계도가 들어있다.
 # - engine: PostgreSQL과 실제로 연결된 엔진 객체.
 from app.database import Base, engine
-# app/routers 폴더 안의 4개 라우터 모듈을 가져온다. 각 모듈 안에는 APIRouter로 만든
+# app/routers 폴더 안의 라우터 모듈들을 가져온다. 각 모듈 안에는 APIRouter로 만든
 # router 객체가 하나씩 들어있다 (예: auth.router, chat.router 등).
-from app.routers import auth, chat, dashboard, documents
+from app.routers import auth, chat, dashboard, documents, quiz, schedule, subjects
 
 # Base.metadata.create_all(bind=engine):
 #   지금까지 app/models.py에서 정의된 모든 테이블(users, documents, document_chunks,
@@ -56,6 +56,9 @@ app.include_router(auth.router)         # /api/auth/...
 app.include_router(dashboard.router)    # /api/dashboard
 app.include_router(documents.router)    # /api/documents/...
 app.include_router(chat.router)         # /api/chat/...
+app.include_router(subjects.router)     # /api/subjects/...
+app.include_router(quiz.router)         # /api/quiz/..., /api/wrong-notes
+app.include_router(schedule.router)     # /api/events/..., /api/dashboard/..., /api/notifications/..., /api/character
 
 
 # 헬스체크(health check)용 엔드포인트.
