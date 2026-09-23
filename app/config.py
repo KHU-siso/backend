@@ -45,10 +45,39 @@ class Settings(BaseSettings):
     # ChromaDB(벡터 검색 DB)가 데이터를 저장할 로컬 폴더 경로.
     chroma_dir: str = "chroma_db"
 
+    # allowed_origins: 이 API를 호출할 수 있는 프론트엔드 출처(도메인)를 콤마(,)로 구분해 적는다.
+    # .env에 값을 안 넣으면(=개발 환경) 로컬 개발 서버 주소만 기본으로 허용한다.
+    # 운영 배포 시에는 .env의 ALLOWED_ORIGINS에 실제 프론트엔드 도메인만 콤마로 나열해야 한다
+    # (예: "https://siso.app,https://www.siso.app"). "*"처럼 전체 허용은 여기서 지원하지 않는다.
+    allowed_origins: str = "http://localhost:3000,http://localhost:5173"
+
+    # max_upload_size_mb: PDF 업로드 시 허용하는 파일의 최대 크기(MB). 이 값을 넘는 파일은
+    # routers/documents.py의 upload_document에서 거부된다. 하드코딩하지 않고 여기서 관리해서,
+    # 배포 환경에 따라 .env의 MAX_UPLOAD_SIZE_MB만 바꾸면 제한값을 조정할 수 있다.
+    max_upload_size_mb: int = 20
+
+    # log_level: 서버 로그를 얼마나 자세히 남길지 정하는 값. logging 모듈의 표준 레벨 이름
+    # ("DEBUG"/"INFO"/"WARNING"/"ERROR")을 문자열로 받는다. 개발 중에는 "DEBUG"로 세세한 로그까지
+    # 보고, 운영 배포 시에는 .env의 LOG_LEVEL=INFO 정도로 소음을 줄이는 식으로 쓴다.
+    log_level: str = "INFO"
+
     # model_config: BaseSettings의 동작을 세부 설정하는 부분.
     # - env_file=".env": 프로젝트 루트의 .env 파일을 읽어서 위 필드들을 채우라는 뜻.
     # - extra="ignore": .env 파일에 위 필드에 없는 값이 더 있어도 에러 내지 말고 무시하라는 뜻.
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    # allowed_origins_list: allowed_origins 문자열("a,b,c")을 콤마 기준으로 나누고,
+    # 각 항목의 앞뒤 공백을 제거한 뒤 빈 문자열은 걸러낸 리스트로 돌려준다.
+    # app/main.py의 CORSMiddleware(allow_origins=...)에 바로 넣을 수 있는 형태다.
+    @property
+    def allowed_origins_list(self) -> list[str]:
+        return [origin.strip() for origin in self.allowed_origins.split(",") if origin.strip()]
+
+    # max_upload_size_bytes: max_upload_size_mb(MB 단위)를 바이트 단위로 변환한 값.
+    # 업로드 스트림을 읽으며 누적 바이트 수와 바로 비교할 수 있게 바이트 단위로 제공한다.
+    @property
+    def max_upload_size_bytes(self) -> int:
+        return self.max_upload_size_mb * 1024 * 1024
 
 
 # 이 파일이 처음 import될 때 딱 한 번 Settings()를 실행해서 .env 값을 읽어 들인다.

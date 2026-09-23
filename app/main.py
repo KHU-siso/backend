@@ -5,10 +5,12 @@
 # 최종적으로 가리키는 FastAPI 애플리케이션 객체(app)가 이 파일에서 만들어집니다.
 #   실행 명령 예: uvicorn app.main:app --reload
 #
-# 하는 일은 크게 3가지입니다.
-#   1) 서버가 켜질 때 DB 테이블을 자동으로 만든다 (없으면 생성, 있으면 그대로 둠)
-#   2) 프론트엔드(다른 도메인/포트)에서의 API 호출을 허용하도록 CORS 설정을 한다
-#   3) 각 기능별로 나뉘어 있는 라우터들(auth, dashboard, documents, chat)을
+# 하는 일은 크게 5가지입니다.
+#   1) 로깅 포맷/레벨을 설정한다 (다른 무엇보다도 가장 먼저 실행되어야 함)
+#   2) 서버가 켜질 때 DB 테이블을 자동으로 만든다 (없으면 생성, 있으면 그대로 둠)
+#   3) 프론트엔드(다른 도메인/포트)에서의 API 호출을 허용하도록 CORS 설정을 한다
+#   4) 전역 예외 처리와 요청 로깅 미들웨어를 등록한다
+#   5) 각 기능별로 나뉘어 있는 라우터들(auth, dashboard, documents, chat 등)을
 #      하나의 앱으로 조립해서 등록한다
 # =============================================================================
 
@@ -20,6 +22,17 @@ from fastapi import FastAPI
 # 이 미들웨어가 있어야 프론트엔드에서 정상적으로 API를 호출할 수 있다.
 from fastapi.middleware.cors import CORSMiddleware
 
+# app/config.py에서 settings를 가져온다 — CORS 허용 도메인 목록(allowed_origins_list)을 쓰기 위함.
+from app.config import settings
+# app/error_handlers.py: Claude API 실패, DB 에러, 그 외 예상 못한 에러까지 전부 일관된
+# {"detail": ..., "error_code": ...} 형태의 JSON으로 응답하게 해주는 전역 예외 핸들러 등록 함수.
+from app.error_handlers import register_exception_handlers
+# app/logging_config.py: logging 모듈의 포맷/레벨을 앱 전체 기준으로 한 번 설정하는 함수.
+# 다른 어떤 모듈이 logger를 쓰기 전에(=가장 먼저) 실행되어야 하므로 이 파일 맨 위에서 바로 호출한다.
+from app.logging_config import configure_logging
+# app/middleware.py: 모든 요청의 메서드/경로/상태코드/처리시간을 한 줄 로그로 남기는
+# 미들웨어를 등록하는 함수.
+from app.middleware import register_request_logging
 # app/database.py에서 가져옴
 # - Base: 모든 ORM 모델(User, Document 등)이 상속받는 부모 클래스. Base.metadata 안에는
 #   지금까지 정의된 모든 테이블의 설계도가 들어있다.
@@ -28,6 +41,11 @@ from app.database import Base, engine
 # app/routers 폴더 안의 라우터 모듈들을 가져온다. 각 모듈 안에는 APIRouter로 만든
 # router 객체가 하나씩 들어있다 (예: auth.router, chat.router 등).
 from app.routers import auth, chat, dashboard, documents, quiz, schedule, subjects
+
+# configure_logging(): 이 파일(main.py)이 임포트되는 시점에 가장 먼저 실행되어야 한다.
+# 이보다 늦게 부르면, 그 사이에 다른 모듈에서 이미 만들어진 로거가 아직 설정 안 된
+# 기본 포맷으로 로그를 남겨버릴 수 있기 때문이다.
+configure_logging()
 
 # Base.metadata.create_all(bind=engine):
 #   지금까지 app/models.py에서 정의된 모든 테이블(users, documents, document_chunks,
@@ -42,12 +60,25 @@ Base.metadata.create_all(bind=engine)
 app = FastAPI(title="Siso API")
 
 # CORS 미들웨어 등록 — 모든 요청/응답에 공통으로 적용되는 처리 계층을 추가하는 것.
+# allow_origins는 더 이상 "*"(전체 허용)를 쓰지 않고, settings.allowed_origins_list
+# (.env의 ALLOWED_ORIGINS)에 명시된 프론트엔드 도메인만 허용한다.
+# 로그인 토큰(Authorization 헤더)이 오가는 API라 전체 허용은 위험하다 — 아무 사이트에서나
+# 이 API로 로그인된 유저 대신 요청을 보낼 수 있게 되기 때문이다.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],   # "*"는 모든 출처(도메인)에서의 요청을 허용한다는 뜻. 개발 단계라 전체 허용.
+    allow_origins=settings.allowed_origins_list,
     allow_methods=["*"],   # GET, POST, PUT, DELETE 등 모든 HTTP 메서드를 허용
     allow_headers=["*"],   # Authorization, Content-Type 등 모든 요청 헤더를 허용
 )
+
+# 전역 예외 핸들러 등록 — 이 아래로 정의된 라우터들에서 발생하는 모든 예외
+# (HTTPException, 요청 검증 실패, Claude API 오류, DB 오류, 그 외 예상 못한 에러)가
+# 전부 app/error_handlers.py에서 정의한 일관된 JSON 포맷으로 응답된다.
+register_exception_handlers(app)
+
+# 요청 로깅 미들웨어 등록 — 이 아래로 등록되는 모든 라우터에 들어오는 요청이
+# "메서드 경로 상태코드 처리시간" 한 줄로 서버 로그에 남는다.
+register_request_logging(app)
 
 # 각 라우터 모듈의 router 객체를 app에 등록한다.
 # include_router로 등록하면, 그 라우터 파일 안에서 @router.get/@router.post로 정의한

@@ -14,7 +14,6 @@
 # =============================================================================
 
 # 파이썬 표준 라이브러리
-import shutil  # 업로드된 파일 스트림을 디스크 파일로 복사할 때 사용
 import uuid    # 저장할 파일의 이름이 겹치지 않도록 무작위 고유 문자열을 만들 때 사용
 from pathlib import Path  # 파일 경로를 다루는 타입
 
@@ -46,6 +45,14 @@ from app.services.pdf_service import (
 # 이 라우터의 모든 엔드포인트는 "/api/documents"로 시작한다.
 router = APIRouter(prefix="/api/documents", tags=["documents"])
 
+# PDF 파일은 항상 "%PDF-"라는 5바이트로 시작한다 (PDF 표준 시그니처/매직 바이트).
+# file.content_type은 클라이언트(브라우저/앱)가 스스로 신고하는 값이라 쉽게 위조할 수 있는 반면,
+# 이 바이트는 파일 내용 자체이므로 "진짜 PDF가 맞는지"를 더 신뢰할 수 있게 확인해준다.
+PDF_MAGIC_BYTES = b"%PDF-"
+# 디스크에 파일을 저장할 때 한 번에 읽어들이는 조각 크기. 파일 전체를 메모리에 한 번에 올리지 않고
+# 이 크기만큼씩 나눠 읽고 쓰면서 누적 크기를 확인하기 위해 사용한다.
+UPLOAD_CHUNK_SIZE = 1024 * 1024  # 1MB
+
 
 # upload_document: PDF 파일 하나를 업로드받아 "검색 가능한 상태"까지 만드는 함수.
 # 어디서 온 기능인가:
@@ -66,8 +73,20 @@ def upload_document(
 ):
     # file.content_type: 브라우저/클라이언트가 보내준 파일의 MIME 타입.
     # PDF가 아니면 처리할 이유가 없으므로 400 Bad Request로 즉시 거절한다.
+    # 다만 이 값은 클라이언트가 자체적으로 신고하는 값이라 위조가 가능하므로, 아래에서
+    # 파일 내용의 매직 바이트로 한 번 더 검증한다 (1차 필터로만 사용).
     if file.content_type != "application/pdf":
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only PDF files are supported")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="PDF 파일만 업로드할 수 있습니다.")
+
+    # file.file.read(...): 업로드 스트림의 맨 앞 5바이트만 미리 읽어서 PDF 매직 바이트인지 확인한다.
+    # 이후 정상적으로 저장하려면 다시 처음부터 읽어야 하므로 seek(0)으로 스트림 위치를 되돌린다.
+    header = file.file.read(len(PDF_MAGIC_BYTES))
+    file.file.seek(0)
+    if header != PDF_MAGIC_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="파일 내용이 PDF 형식이 아닙니다. 올바른 PDF 파일인지 확인해주세요.",
+        )
 
     # Path(settings.upload_dir) / str(current_user.id):
     #   예) uploads/3  → 유저별로 폴더를 나눠서 저장한다 (다른 유저 파일과 섞이지 않도록).
@@ -79,10 +98,25 @@ def upload_document(
     # 원본 파일명을 그대로 쓰지 않는 이유는, 같은 이름의 파일을 여러 번 올려도 서로 덮어쓰지 않게 하기 위함.
     stored_path = user_dir / f"{uuid.uuid4().hex}.pdf"
 
-    # 업로드된 파일 스트림(file.file)을 서버 디스크의 stored_path 경로에 실제로 저장한다.
-    # "wb" = write binary(바이너리 쓰기 모드). shutil.copyfileobj로 스트림을 그대로 복사한다.
-    with stored_path.open("wb") as out:
-        shutil.copyfileobj(file.file, out)
+    # 업로드된 파일 스트림(file.file)을 서버 디스크의 stored_path 경로에 저장하되,
+    # shutil.copyfileobj로 한 번에 복사하지 않고 UPLOAD_CHUNK_SIZE만큼씩 나눠 읽으며
+    # 누적 크기를 직접 센다. settings.max_upload_size_bytes를 넘어서는 순간 즉시 중단해서,
+    # 큰 파일이라도 전체를 디스크에 다 쓴 뒤에야 거부하는 낭비 없이 초과분을 막는다.
+    total_bytes = 0
+    try:
+        with stored_path.open("wb") as out:
+            while chunk := file.file.read(UPLOAD_CHUNK_SIZE):
+                total_bytes += len(chunk)
+                if total_bytes > settings.max_upload_size_bytes:
+                    raise HTTPException(
+                        status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+                        detail=f"파일 크기는 최대 {settings.max_upload_size_mb}MB까지 업로드할 수 있습니다.",
+                    )
+                out.write(chunk)
+    except HTTPException:
+        # 크기 초과로 중단된 경우, 디스크에 이미 쓰인 불완전한 파일 조각을 정리한다.
+        stored_path.unlink(missing_ok=True)
+        raise
 
     # services/pdf_service.py의 함수 호출
     # extract_text: 방금 저장한 PDF 파일에서 전체 텍스트와 페이지 수를 뽑아낸다.
