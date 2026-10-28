@@ -390,6 +390,9 @@ class Notification(Base):
     related_id = Column(Integer, nullable=True)
     # is_completed: 유저가 "확인/완료" 체크를 했는지. 체크 전까지는 계속 미완료 알림 목록에 남는다.
     is_completed = Column(Boolean, default=False, nullable=False)
+    # email_sent: 이 알림에 대한 메일을 이미 발송(또는 발송 시도를 선점)했는지. 같은 알림에 메일이
+    # 두 번 나가지 않도록 services/notification_service.py가 발송 전에 이 값을 확인/갱신한다.
+    email_sent = Column(Boolean, default=False, server_default="false", nullable=False)
     notify_at = Column(DateTime(timezone=True), nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 

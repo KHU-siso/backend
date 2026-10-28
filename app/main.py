@@ -16,6 +16,8 @@
 
 # FastAPI 라이브러리에서 가져옴 — FastAPI: 웹 애플리케이션 객체를 만드는 핵심 클래스
 from fastapi import FastAPI
+# 시작 시 컬럼 보강용 raw SQL 실행에 사용
+from sqlalchemy import text
 # CORS(Cross-Origin Resource Sharing) 관련 미들웨어.
 # 브라우저는 기본적으로 "다른 출처(도메인/포트)"로의 API 요청을 보안상 막는데,
 # 프론트엔드(예: localhost:3000)와 백엔드(예: localhost:8000)가 다른 포트에서 돌 때
@@ -54,6 +56,11 @@ configure_logging()
 #   나중에 테이블 구조를 바꾸게 되면 Alembic 같은 별도 마이그레이션 도구가 필요하다).
 #   이 코드는 파일이 import되는 시점(=서버가 켜지는 시점)에 딱 한 번 실행된다.
 Base.metadata.create_all(bind=engine)
+
+# create_all은 이미 있는 테이블에 새 컬럼을 추가하지 못한다. Alembic을 쓰지 않는 이 프로젝트에서는
+# notifications.email_sent처럼 나중에 추가된 컬럼을 이렇게 직접 보강한다 (IF NOT EXISTS라 반복 실행해도 안전).
+with engine.begin() as _conn:
+    _conn.execute(text("ALTER TABLE notifications ADD COLUMN IF NOT EXISTS email_sent BOOLEAN NOT NULL DEFAULT false"))
 
 # FastAPI 애플리케이션 객체 생성. title="Siso API"는 자동 생성되는 API 문서(/docs)의
 # 제목으로 표시된다.

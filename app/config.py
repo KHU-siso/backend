@@ -61,6 +61,16 @@ class Settings(BaseSettings):
     # 보고, 운영 배포 시에는 .env의 LOG_LEVEL=INFO 정도로 소음을 줄이는 식으로 쓴다.
     log_level: str = "INFO"
 
+    # 복습 알림 메일 발송 설정 (services/email_service.py). 서비스용 Gmail 계정 하나로 모든 유저에게
+    # 보내며, Google 계정의 "앱 비밀번호"를 smtp_password에 넣는다 (일반 로그인 비밀번호는 동작하지 않음).
+    # email_enabled가 False이거나 smtp_user/smtp_password가 비어 있으면 메일은 발송하지 않고 건너뛴다.
+    smtp_host: str = "smtp.gmail.com"
+    smtp_port: int = 587
+    smtp_user: str | None = None
+    smtp_password: str | None = None
+    email_from_name: str = "시소"
+    email_enabled: bool = False
+
     # model_config: BaseSettings의 동작을 세부 설정하는 부분.
     # - env_file=".env": 프로젝트 루트의 .env 파일을 읽어서 위 필드들을 채우라는 뜻.
     # - extra="ignore": .env 파일에 위 필드에 없는 값이 더 있어도 에러 내지 말고 무시하라는 뜻.
