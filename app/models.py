@@ -40,7 +40,7 @@
 # - Text: 길이 제한이 없는 긴 문자열을 저장하는 컬럼 타입 (PDF 청크 내용처럼 긴 글에 사용)
 # - Time: 시:분:초만 저장하는 컬럼 타입 (수업 시작/종료 시각에 사용)
 # - func: SQL 함수(예: func.now() = 현재 시각)를 파이썬에서 쓸 수 있게 해주는 도구
-from sqlalchemy import Boolean, Column, Date, DateTime, ForeignKey, Integer, JSON, String, Text, Time, UniqueConstraint, func
+from sqlalchemy import Boolean, Column, Date, DateTime, ForeignKey, Index, Integer, JSON, String, Text, Time, UniqueConstraint, func
 # relationship: 두 테이블(모델) 사이의 "관계"를 파이썬 객체 레벨에서 편하게 다루게 해주는 함수.
 # 예를 들어 user.documents라고 쓰면 SQL JOIN을 직접 안 짜도 그 유저가 올린 문서 목록을 가져올 수 있다.
 from sqlalchemy.orm import relationship
@@ -152,6 +152,8 @@ class DocumentChunk(Base):
 # 나누는 대화방일 수도 있다(document_id가 NULL).
 class ChatConversation(Base):
     __tablename__ = "chat_conversations"
+    # 과목 채팅은 (사용자, 과목)당 대화방 하나. subject_ref가 NULL인 일반 대화방은 NULL끼리 서로 다른 값으로 취급돼 제약을 받지 않는다.
+    __table_args__ = (Index("uq_chat_conversations_user_subject", "user_id", "subject_ref", unique=True),)
 
     id = Column(Integer, primary_key=True)
     # user_id: 이 대화방의 주인 유저. 유저가 삭제되면 대화방도 함께 삭제된다.
@@ -162,6 +164,8 @@ class ChatConversation(Base):
     document_id = Column(Integer, ForeignKey("documents.id", ondelete="SET NULL"), nullable=True)
     # title: 대화방 제목. 기본값은 "새 대화" (routers/chat.py에서 문서 이름 등으로 덮어쓸 수 있음)
     title = Column(String(255), default="새 대화")
+    # subject_ref: 과목 전용 채팅이면 프론트의 과목 id(Document.subject_ref와 같은 값). 이 대화는 그 과목에 올린 자료만 검색한다.
+    subject_ref = Column(String(64), nullable=True, index=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     owner = relationship("User", back_populates="conversations")

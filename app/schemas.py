@@ -116,12 +116,28 @@ class ConversationCreate(BaseModel):
     title: str | None = None
 
 
+# SubjectConversationCreate: 과목 전용 대화방을 가져오거나 만들 때(POST /api/chat/subjects/{subject_ref}/conversation)의 요청 body.
+class SubjectConversationCreate(BaseModel):
+    title: str | None = Field(default=None, max_length=255)
+
+
+# SubjectChatSummary: 과목별 대화 목록 페이지(GET /api/chat/subjects)의 한 줄.
+class SubjectChatSummary(BaseModel):
+    subject_ref: str
+    conversation_id: int
+    title: str
+    message_count: int
+    last_message: str | None
+    last_at: datetime | None
+
+
 # ConversationOut: 대화방 정보를 응답할 때 쓰는 형태 (대화방 생성/목록 조회 결과)
 class ConversationOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
     document_id: int | None
+    subject_ref: str | None = None
     title: str
     created_at: datetime
 

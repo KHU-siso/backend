@@ -67,6 +67,9 @@ with engine.begin() as _conn:
     _conn.execute(text("ALTER TABLE documents ADD COLUMN IF NOT EXISTS subject_ref VARCHAR(64)"))
     _conn.execute(text("ALTER TABLE email_verifications ADD COLUMN IF NOT EXISTS verified BOOLEAN NOT NULL DEFAULT false"))
     _conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS deadline_email_enabled BOOLEAN NOT NULL DEFAULT true"))
+    _conn.execute(text("ALTER TABLE chat_conversations ADD COLUMN IF NOT EXISTS subject_ref VARCHAR(64)"))
+    _conn.execute(text("CREATE INDEX IF NOT EXISTS ix_chat_conversations_subject_ref ON chat_conversations (subject_ref)"))
+    _conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_chat_conversations_user_subject ON chat_conversations (user_id, subject_ref)"))
     _conn.execute(text("ALTER TABLE character_states ADD COLUMN IF NOT EXISTS signup_bonus_granted BOOLEAN NOT NULL DEFAULT false"))
 
 # FastAPI 애플리케이션 객체 생성. title="Siso API"는 자동 생성되는 API 문서(/docs)의

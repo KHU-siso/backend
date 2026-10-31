@@ -18,6 +18,8 @@
 # FastAPI에서 가져옴 — 라우터 등록, 의존성 주입, 에러 응답
 from fastapi import APIRouter, Depends, HTTPException, status
 # SQLAlchemy ORM 세션 타입
+from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 # app/deps.py: 로그인 유저 조회, DB 세션 생성
@@ -25,7 +27,14 @@ from app.deps import get_current_user, get_db
 # app/models.py: 대화방/메시지/문서/유저 ORM 모델
 from app.models import ChatConversation, ChatMessage, Document, User
 # app/schemas.py: 요청/응답 형태 정의
-from app.schemas import ConversationCreate, ConversationOut, MessageCreate, MessageOut
+from app.schemas import (
+    ConversationCreate,
+    ConversationOut,
+    MessageCreate,
+    MessageOut,
+    SubjectChatSummary,
+    SubjectConversationCreate,
+)
 # services/claude_service.py: 실제 Claude API 호출 함수
 from app.services.claude_service import ask
 # services/embedding_service.py: 텍스트를 벡터로 변환하는 함수 (질문을 검색용 벡터로 바꿀 때 사용)
@@ -40,6 +49,9 @@ router = APIRouter(prefix="/api/chat", tags=["chat"])
 # 너무 적으면 답변에 필요한 정보가 빠질 수 있고, 너무 많으면 관련 없는 내용까지
 # 프롬프트에 섞여 들어가 오히려 답변 품질이 떨어질 수 있어 5개로 절충했다.
 TOP_K_CHUNKS = 5
+
+# 과목 채팅인데 그 과목에 검색할 자료가 없을 때 답변 맨 앞에 붙이는 안내 (대화 기록에도 그대로 저장된다)
+NO_MATERIAL_NOTICE = "※ 이 과목에 올린 자료가 없어 일반적인 지식으로 답변해요.\n\n"
 
 
 # create_conversation: 새 대화방을 만드는 함수.
@@ -73,6 +85,88 @@ def create_conversation(
     db.commit()
     db.refresh(conversation)
     return conversation
+
+
+# ----- 과목 전용 채팅 -----
+# 과목 하나당 대화방 하나(chat_conversations.subject_ref). 메시지 기록과 자료 검색 범위가 모두 그 과목으로 한정된다.
+# 메시지 조회/전송은 기존 /conversations/{id}/messages 를 그대로 쓴다.
+
+
+@router.get("/subjects", response_model=list[SubjectChatSummary])
+def list_subject_chats(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    conversations = (
+        db.query(ChatConversation)
+        .filter(ChatConversation.user_id == current_user.id, ChatConversation.subject_ref.isnot(None))
+        .all()
+    )
+    summaries = []
+    for conversation in conversations:
+        count = db.query(func.count(ChatMessage.id)).filter(ChatMessage.conversation_id == conversation.id).scalar()
+        last = (
+            db.query(ChatMessage)
+            .filter(ChatMessage.conversation_id == conversation.id)
+            .order_by(ChatMessage.created_at.desc(), ChatMessage.id.desc())
+            .first()
+        )
+        summaries.append(
+            SubjectChatSummary(
+                subject_ref=conversation.subject_ref,
+                conversation_id=conversation.id,
+                title=conversation.title,
+                message_count=count,
+                last_message=last.content if last else None,
+                last_at=last.created_at if last else None,
+            )
+        )
+    return summaries
+
+
+@router.post("/subjects/{subject_ref}/conversation", response_model=ConversationOut)
+def get_or_create_subject_conversation(
+    subject_ref: str,
+    payload: SubjectConversationCreate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    if not subject_ref or len(subject_ref) > 64:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="올바르지 않은 과목입니다.")
+
+    def existing():
+        return (
+            db.query(ChatConversation)
+            .filter(ChatConversation.user_id == current_user.id, ChatConversation.subject_ref == subject_ref)
+            .first()
+        )
+
+    conversation = existing()
+    if conversation is None:
+        conversation = ChatConversation(
+            user_id=current_user.id, subject_ref=subject_ref, title=payload.title or "과목 채팅"
+        )
+        db.add(conversation)
+        try:
+            db.commit()
+        except IntegrityError:  # 동시에 두 번 요청돼도 유니크 인덱스 덕분에 하나만 만들어지고 나머지는 그걸 돌려받는다
+            db.rollback()
+            conversation = existing()
+        else:
+            db.refresh(conversation)
+    return conversation
+
+
+@router.delete("/subjects/{subject_ref}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_subject_conversation(
+    subject_ref: str, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)
+):
+    """과목을 지울 때 그 과목의 채팅 기록도 함께 지운다."""
+    conversation = (
+        db.query(ChatConversation)
+        .filter(ChatConversation.user_id == current_user.id, ChatConversation.subject_ref == subject_ref)
+        .first()
+    )
+    if conversation is not None:
+        db.delete(conversation)
+        db.commit()
 
 
 # list_conversations: 현재 유저의 대화방 목록을 최신순으로 조회하는 함수.
@@ -132,12 +226,25 @@ def send_message(
     context_text = None
     # 이 대화방이 특정 문서(document_id)를 기준으로 한다면, 그 문서 안에서 질문과 가장
     # 관련 있는 내용을 찾아 context_text에 담는다. 문서 없는 일반 대화방이면 그냥 None으로 둔다.
-    if conversation.document_id is not None:
-        context_text = _build_context(payload.content, conversation.document_id)
+    subject_chat = conversation.subject_ref is not None
+    if subject_chat:
+        # 과목 채팅: 그 과목에 올린 내 문서들만 검색 대상으로 한다 (다른 과목·다른 사용자의 자료는 섞이지 않는다)
+        document_ids = [
+            doc_id
+            for (doc_id,) in db.query(Document.id).filter(
+                Document.user_id == current_user.id, Document.subject_ref == conversation.subject_ref
+            )
+        ]
+        if document_ids:
+            context_text = _build_context(payload.content, document_ids)
+    elif conversation.document_id is not None:
+        context_text = _build_context(payload.content, [conversation.document_id])
 
     # ask(): services/claude_service.py 함수. 질문 + 대화 기록 + (있다면) 문서 컨텍스트를
     # Claude API로 보내고, 텍스트 답변을 받아온다.
     answer = ask(payload.content, history, context_text)
+    if subject_chat and not context_text:
+        answer = NO_MATERIAL_NOTICE + answer
 
     # 유저가 보낸 질문과 AI의 답변을 각각 별도의 ChatMessage 행으로 만든다.
     user_message = ChatMessage(conversation_id=conversation.id, role="user", content=payload.content)
@@ -168,7 +275,7 @@ def _get_owned_conversation(db: Session, conversation_id: int, user_id: int) -> 
 #   TOP_K_CHUNKS개만 가져온다. 문서 전체를 순서대로 넣던 이전 방식과 달리,
 #   문서가 길어도 질문과 무관한 청크가 컨텍스트를 차지하지 않는다.
 # 언제 쓰이나: send_message 안에서, 대화방이 특정 문서를 기준으로 할 때만 호출된다.
-def _build_context(question: str, document_id: int) -> str:
+def _build_context(question: str, document_ids: list[int]) -> str:
     """질문을 임베딩해서 ChromaDB에서 해당 문서 안의 가장 관련 있는 청크
     TOP_K_CHUNKS개만 가져온다. 문서 전체를 순서대로 넣던 이전 방식과 달리,
     문서가 길어도 질문과 무관한 청크가 컨텍스트를 차지하지 않는다."""
@@ -186,7 +293,7 @@ def _build_context(question: str, document_id: int) -> str:
     results = collection.query(
         query_embeddings=[query_embedding],
         n_results=TOP_K_CHUNKS,
-        where={"document_id": document_id},
+        where={"document_id": {"$in": document_ids}},
     )
 
     # results는 {"documents": [[...]], "distances": [[...]], ...} 같은 형태로,
