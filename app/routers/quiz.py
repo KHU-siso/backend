@@ -16,9 +16,9 @@
 # =============================================================================
 
 # FastAPI에서 가져옴 — 라우터 등록, 의존성 주입, 에러 응답
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 # SQLAlchemy의 func — MAX() 같은 집계 함수를 파이썬 코드에서 쓸 수 있게 해줌
-from sqlalchemy import func
+from sqlalchemy import func, select
 # SQLAlchemy ORM 세션 타입
 from sqlalchemy.orm import Session
 
@@ -239,7 +239,12 @@ def get_result(
 #   그 id들과 다시 조인해서 실제 행을 가져오는 "그룹별 최신 행 찾기"의 표준적인 SQL 패턴이다.
 # 언제 쓰이나: 프론트엔드의 "오답노트" 화면에 들어갔을 때 호출된다.
 @router.get("/wrong-notes", response_model=list[WrongNoteOut])
-def list_wrong_notes(current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def list_wrong_notes(
+    subject_ref: str | None = Query(default=None, max_length=64),
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """내가 틀린 문제 목록(문제별 가장 최근 오답). subject_ref를 주면 그 과목 자료로 만든 퀴즈의 오답만 돌려준다."""
     latest_wrong_ids = (
         db.query(func.max(QuizAttempt.id).label("latest_wrong_id"))
         .filter(QuizAttempt.user_id == current_user.id, QuizAttempt.is_correct.is_(False))
@@ -247,31 +252,46 @@ def list_wrong_notes(current_user: User = Depends(get_current_user), db: Session
         .subquery()
     )
 
-    wrong_attempts = (
-        db.query(QuizAttempt)
-        .join(latest_wrong_ids, QuizAttempt.id == latest_wrong_ids.c.latest_wrong_id)
-        .order_by(QuizAttempt.answered_at.desc())
+    query = db.query(QuizAttempt).join(latest_wrong_ids, QuizAttempt.id == latest_wrong_ids.c.latest_wrong_id)
+    if subject_ref is not None:
+        query = (
+            query.join(QuizQuestion, QuizQuestion.id == QuizAttempt.quiz_question_id)
+            .join(QuizSet, QuizSet.id == QuizQuestion.quiz_set_id)
+            .join(Document, Document.id == QuizSet.document_id)
+            .filter(QuizSet.user_id == current_user.id, Document.subject_ref == subject_ref)
+        )
+    wrong_attempts = query.order_by(QuizAttempt.answered_at.desc()).all()
+    if not wrong_attempts:
+        return []
+
+    # 문제마다 쿼리를 두 번씩 날리지 않도록(N+1) 틀린 횟수와 가장 최근 풀이를 한 번에 묶어서 가져온다.
+    question_ids = [attempt.quiz_question_id for attempt in wrong_attempts]
+    wrong_counts = dict(
+        db.query(QuizAttempt.quiz_question_id, func.count(QuizAttempt.id))
+        .filter(
+            QuizAttempt.user_id == current_user.id,
+            QuizAttempt.quiz_question_id.in_(question_ids),
+            QuizAttempt.is_correct.is_(False),
+        )
+        .group_by(QuizAttempt.quiz_question_id)
         .all()
     )
+    latest_ids = (
+        db.query(func.max(QuizAttempt.id))
+        .filter(QuizAttempt.user_id == current_user.id, QuizAttempt.quiz_question_id.in_(question_ids))
+        .group_by(QuizAttempt.quiz_question_id)
+        .subquery()
+    )
+    latest_correct = {
+        question_id: is_correct
+        for question_id, is_correct in db.query(QuizAttempt.quiz_question_id, QuizAttempt.is_correct).filter(
+            QuizAttempt.id.in_(select(latest_ids.c[0]))
+        )
+    }
 
     notes = []
     for attempt in wrong_attempts:
         question = attempt.question
-        latest = (
-            db.query(QuizAttempt)
-            .filter(QuizAttempt.quiz_question_id == question.id, QuizAttempt.user_id == current_user.id)
-            .order_by(QuizAttempt.id.desc())
-            .first()
-        )
-        wrong_count = (
-            db.query(func.count(QuizAttempt.id))
-            .filter(
-                QuizAttempt.quiz_question_id == question.id,
-                QuizAttempt.user_id == current_user.id,
-                QuizAttempt.is_correct.is_(False),
-            )
-            .scalar()
-        )
         document = question.quiz_set.document if hasattr(question.quiz_set, "document") else None
         notes.append(
             WrongNoteOut(
@@ -285,8 +305,8 @@ def list_wrong_notes(current_user: User = Depends(get_current_user), db: Session
                 answered_at=attempt.answered_at,
                 quiz_type=question.quiz_set.quiz_type,
                 subject_ref=document.subject_ref if document else None,
-                attempts=wrong_count,
-                resolved=bool(latest and latest.is_correct),
+                attempts=wrong_counts.get(question.id, 0),
+                resolved=bool(latest_correct.get(question.id)),
             )
         )
     return notes
