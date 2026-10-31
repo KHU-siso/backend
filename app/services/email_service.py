@@ -13,7 +13,7 @@ from email.utils import formataddr
 from html import escape
 
 from app.config import settings
-from app.services.email_templates import deadline_email_html, verification_email_html
+from app.services.email_templates import deadline_email_html, study_reminder_email_html, verification_email_html
 
 logger = logging.getLogger("app.email")
 
@@ -130,4 +130,37 @@ def send_assignment_deadline_email(to_email: str, user_name: str, subject_name: 
         return True
     except Exception as exc:
         logger.error("과제 마감 메일 발송 실패: to=%s, error=%s", to_email, type(exc).__name__)
+        return False
+
+
+def send_study_reminder_email(to_email: str, user_name: str, slot_text: str, subject_name: str = "", quiz: list[dict] | None = None) -> bool:
+    """빈 시간 학습 알림 메일. quiz가 비어 있으면 알림만 보낸다. 성공하면 True, 설정 누락/발송 실패면 False."""
+    if not email_configured():
+        logger.warning("빈 시간 알림 메일 발송 불가: EMAIL_ENABLED/SMTP_USER/SMTP_PASSWORD 설정을 확인하세요")
+        return False
+    quiz = quiz or []
+    try:
+        msg = EmailMessage()
+        msg["Subject"] = f"[MORAM] 공부할 시간이에요 ({slot_text})"
+        msg["From"] = formataddr(("MORAM", settings.smtp_user))
+        msg["To"] = to_email
+        lines = [f"{user_name}님, 공부할 시간이에요!", "", f"지금부터 비어 있는 시간({slot_text})에 짧게 집중해 보세요."]
+        if quiz:
+            lines += ["", f"[{subject_name}] 한 문제씩 풀어봐요"]
+            for number, item in enumerate(quiz, 1):
+                lines.append(f"Q{number}. {item['question']}")
+                lines += [f"  {index}) {option}" for index, option in enumerate(item["options"], 1)]
+            lines += ["", "정답 및 해설"]
+            lines += [f"Q{number}. {item['answer']}" + (f" - {item['explanation']}" if item["explanation"] else "") for number, item in enumerate(quiz, 1)]
+        lines += ["", "- MORAM 드림", "", "이 알림은 MORAM 마이페이지의 '빈 시간 학습 알림'에서 끌 수 있어요."]
+        msg.set_content("\n".join(lines))
+        msg.add_alternative(study_reminder_email_html(user_name, slot_text, subject_name, quiz), subtype="html")
+        with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=SMTP_TIMEOUT_SECONDS) as server:
+            server.starttls()
+            server.login(settings.smtp_user, settings.smtp_password)
+            server.send_message(msg)
+        logger.info("빈 시간 알림 메일 발송 완료: to=%s", to_email)
+        return True
+    except Exception as exc:
+        logger.error("빈 시간 알림 메일 발송 실패: to=%s, error=%s", to_email, type(exc).__name__)
         return False

@@ -76,6 +76,10 @@ class Settings(BaseSettings):
     scheduler_enabled: bool = True
     scheduler_interval_seconds: int = 300
 
+    # 빈 시간 학습 알림: 사용자당 하루 최대 발송 수, 빈 시간 시작 몇 분 전에 보낼지
+    study_reminder_max_per_day: int = 3
+    study_reminder_lead_minutes: int = 10
+
     # model_config: BaseSettings의 동작을 세부 설정하는 부분.
     # - env_file=".env": 프로젝트 루트의 .env 파일을 읽어서 위 필드들을 채우라는 뜻.
     # - extra="ignore": .env 파일에 위 필드에 없는 값이 더 있어도 에러 내지 말고 무시하라는 뜻.

@@ -22,6 +22,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from app.config import settings
 from app.database import SessionLocal
 from app.models import EmailNotificationLog, User, UserState
+from app.services import free_time_scheduler
 from app.services.email_service import email_configured, send_assignment_deadline_email
 
 logger = logging.getLogger("app.scheduler")
@@ -150,6 +151,10 @@ class DeadlineScheduler:
                 run_once()
             except Exception:
                 logger.exception("과제 마감 알림 스케줄러 오류")
+            try:
+                free_time_scheduler.run_once()
+            except Exception:
+                logger.exception("빈 시간 학습 알림 스케줄러 오류")
             if self._stop.wait(interval):
                 return
 

@@ -98,6 +98,44 @@ def deadline_email_html(user_name: str, subject_name: str, assignment_title: str
     return _shell(body, f"{assignment_title} · {remaining}")
 
 
+def study_reminder_email_html(user_name: str, slot_text: str, subject_name: str, quiz: list[dict]) -> str:
+    """빈 시간 학습 알림: '공부할 시간이에요' + (자료가 있으면) 짧은 퀴즈 1~3개. 정답·해설은 맨 아래에 모아 둔다."""
+    parts = [
+        _header(),
+        "<tr><td align=\"center\" style=\"padding:44px 24px 26px\">"
+        f"<div style=\"font-size:22px;font-weight:800;color:#000;line-height:1.6\">{escape(user_name)} 님, 공부할 시간이에요.</div>"
+        f"<div style=\"font-size:14px;font-weight:700;color:#666;margin-top:22px\">지금부터 비어 있는 시간({escape(slot_text)})에 짧게 집중해 볼까요?</div>"
+        "</td></tr>",
+        "<tr><td style=\"border-top:1px solid #d9dce3;font-size:0;line-height:0\">&nbsp;</td></tr>",
+        _section("오늘의 학습 시간", _card("icon_clock", "빈 시간이 곧 시작돼요.", slot_text, "학습 시작하기", APP_URL)),
+    ]
+    if quiz:
+        items = ""
+        for number, item in enumerate(quiz, 1):
+            options = "".join(f"<div style=\"font-size:13px;color:#444;line-height:1.7;padding-left:8px\">{index}) {escape(option)}</div>" for index, option in enumerate(item["options"], 1))
+            items += (
+                f"<div style=\"margin:0 0 16px\"><div style=\"font-size:14px;font-weight:700;color:{NAVY};line-height:1.6\">Q{number}. {escape(item['question'])}</div>{options}</div>"
+            )
+        answers = "".join(
+            f"<div style=\"font-size:13px;color:#444;line-height:1.7;margin-bottom:6px\"><strong>Q{number}. {escape(item['answer'])}</strong>"
+            + (f" — {escape(item['explanation'])}" if item["explanation"] else "")
+            + "</div>"
+            for number, item in enumerate(quiz, 1)
+        )
+        parts.append(
+            "<tr><td style=\"padding:8px 28px 4px\">"
+            f"<div style=\"font-size:18px;font-weight:800;color:#000;margin:18px 0 10px\">&bull;&nbsp;{escape(subject_name)} 한 문제씩 풀어봐요</div>"
+            f"<div style=\"border:1px solid #d3d8e3;border-radius:18px;padding:16px\">{items}</div>"
+            f"<div style=\"font-size:12px;font-weight:700;color:{BLUE};margin:16px 0 6px\">정답 및 해설</div>{answers}</td></tr>"
+        )
+    parts.append(
+        "<tr><td style=\"padding:18px 28px 10px;font-size:11px;color:#9aa1b2;text-align:center\">"
+        "이 알림은 MORAM 마이페이지의 '빈 시간 학습 알림'에서 끌 수 있어요.</td></tr>"
+    )
+    parts.append(_footer())
+    return _shell("".join(parts), f"{slot_text} 공부할 시간이에요")
+
+
 def verification_email_html(code: str, expire_minutes: int) -> str:
     """회원가입 이메일 인증 코드."""
     body = (

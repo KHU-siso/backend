@@ -39,6 +39,8 @@ from app.schemas import (
 from app.services.claude_service import ask
 # services/embedding_service.py: 텍스트를 벡터로 변환하는 함수 (질문을 검색용 벡터로 바꿀 때 사용)
 from app.services.embedding_service import embed_text
+# services/note_context_service.py: 이 과목에 내가 쓴 학습 노트를 채팅 근거로 가져오는 함수
+from app.services.note_context_service import build_notes_context, load_subject_notes
 # services/pdf_service.py: ChromaDB 컬렉션을 가져오는 함수 (업로드 때 저장한 그 컬렉션과 동일)
 from app.services.pdf_service import get_chunk_collection
 
@@ -52,6 +54,9 @@ TOP_K_CHUNKS = 5
 
 # 과목 채팅인데 그 과목에 검색할 자료가 없을 때 답변 맨 앞에 붙이는 안내 (대화 기록에도 그대로 저장된다)
 NO_MATERIAL_NOTICE = "※ 이 과목에 올린 자료가 없어 일반적인 지식으로 답변해요.\n\n"
+# PDF 자료는 없고 내가 쓴 노트만 근거가 될 때 / 자료와 노트가 모두 근거일 때의 안내
+NOTES_ONLY_NOTICE = "※ 내 노트를 바탕으로 답해요.\n\n"
+MATERIAL_AND_NOTES_NOTICE = "※ 올린 강의자료와 내 노트를 모두 근거로 답해요.\n\n"
 
 
 # create_conversation: 새 대화방을 만드는 함수.
@@ -224,6 +229,7 @@ def send_message(
     history = [{"role": m.role, "content": m.content} for m in conversation.messages]
 
     context_text = None
+    material_context = notes_context = ""
     # 이 대화방이 특정 문서(document_id)를 기준으로 한다면, 그 문서 안에서 질문과 가장
     # 관련 있는 내용을 찾아 context_text에 담는다. 문서 없는 일반 대화방이면 그냥 None으로 둔다.
     subject_chat = conversation.subject_ref is not None
@@ -235,16 +241,26 @@ def send_message(
                 Document.user_id == current_user.id, Document.subject_ref == conversation.subject_ref
             )
         ]
-        if document_ids:
-            context_text = _build_context(payload.content, document_ids)
+        material_context = _build_context(payload.content, document_ids) if document_ids else ""
+        # 같은 사용자·같은 과목의 학습 노트도 근거에 포함한다 (다른 사용자·다른 과목의 노트는 읽지 않는다)
+        notes_context = build_notes_context(load_subject_notes(db, current_user.id, conversation.subject_ref), payload.content)
+        sections = []
+        if material_context:
+            sections.append(f"[강의자료]\n{material_context}" if notes_context else material_context)
+        if notes_context:
+            sections.append(notes_context)
+        context_text = "\n\n".join(sections) or None
     elif conversation.document_id is not None:
         context_text = _build_context(payload.content, [conversation.document_id])
 
     # ask(): services/claude_service.py 함수. 질문 + 대화 기록 + (있다면) 문서 컨텍스트를
     # Claude API로 보내고, 텍스트 답변을 받아온다.
     answer = ask(payload.content, history, context_text)
-    if subject_chat and not context_text:
-        answer = NO_MATERIAL_NOTICE + answer
+    if subject_chat:
+        if not context_text:
+            answer = NO_MATERIAL_NOTICE + answer
+        elif notes_context:
+            answer = (MATERIAL_AND_NOTES_NOTICE if material_context else NOTES_ONLY_NOTICE) + answer
 
     # 유저가 보낸 질문과 AI의 답변을 각각 별도의 ChatMessage 행으로 만든다.
     user_message = ChatMessage(conversation_id=conversation.id, role="user", content=payload.content)
