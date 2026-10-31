@@ -48,7 +48,7 @@ from app.services.email_service import send_verification_email
 #   - UserLogin: 로그인 요청 body 형태 (email, password)
 #   - TokenOut: 로그인/회원가입 성공 시 응답 형태 (토큰 + 유저 정보)
 #   - UserOut: 유저 정보를 외부에 보여줄 때의 형태 (비밀번호 해시 같은 민감정보는 제외됨)
-from app.schemas import SendCodeRequest, TokenOut, UserCreate, UserLogin, UserOut, VerifyCodeRequest, UserUpdate, PasswordChange
+from app.schemas import SendCodeRequest, TokenOut, UserCreate, UserLogin, UserOut, VerifyCodeRequest, UserUpdate, PasswordChange, NotificationSettingsUpdate
 
 # app/security.py: 비밀번호 해시/검증, JWT 토큰 생성 함수들
 #   - create_access_token: 로그인 상태를 증명하는 JWT 토큰 문자열을 만듦
@@ -259,6 +259,18 @@ def update_me(payload: UserUpdate, current_user: User = Depends(get_current_user
     if nickname.lower() != current_user.nickname.lower() and _nickname_taken(db, nickname):
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="이미 사용 중인 닉네임입니다.")
     current_user.nickname = nickname
+    db.commit()
+    db.refresh(current_user)
+    return current_user
+
+
+@router.patch("/me/notification-settings", response_model=UserOut)
+def update_notification_settings(
+    payload: NotificationSettingsUpdate,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    current_user.deadline_email_enabled = payload.deadline_email_enabled
     db.commit()
     db.refresh(current_user)
     return current_user

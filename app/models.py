@@ -40,7 +40,7 @@
 # - Text: 길이 제한이 없는 긴 문자열을 저장하는 컬럼 타입 (PDF 청크 내용처럼 긴 글에 사용)
 # - Time: 시:분:초만 저장하는 컬럼 타입 (수업 시작/종료 시각에 사용)
 # - func: SQL 함수(예: func.now() = 현재 시각)를 파이썬에서 쓸 수 있게 해주는 도구
-from sqlalchemy import Boolean, Column, Date, DateTime, ForeignKey, Integer, JSON, String, Text, Time, func
+from sqlalchemy import Boolean, Column, Date, DateTime, ForeignKey, Integer, JSON, String, Text, Time, UniqueConstraint, func
 # relationship: 두 테이블(모델) 사이의 "관계"를 파이썬 객체 레벨에서 편하게 다루게 해주는 함수.
 # 예를 들어 user.documents라고 쓰면 SQL JOIN을 직접 안 짜도 그 유저가 올린 문서 목록을 가져올 수 있다.
 from sqlalchemy.orm import relationship
@@ -66,6 +66,9 @@ class User(Base):
     # created_at: 가입 시각. server_default=func.now() → 행이 INSERT될 때 DB가 자동으로
     # 현재 시각을 채워준다 (파이썬 코드에서 따로 값을 넣지 않아도 됨).
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    # deadline_email_enabled: 마이페이지 "과제 마감 알림" 토글. 켜진 사용자에게만 마감 24시간 이내
+    # 과제 메일을 보낸다. 기존 가입자도 화면 기본값(켜짐)과 같도록 기본값은 true.
+    deadline_email_enabled = Column(Boolean, nullable=False, default=True, server_default="true")
 
     # documents: 이 유저가 올린 Document들과의 관계. back_populates="owner"는
     # Document 쪽의 owner 필드와 서로 짝을 이루도록 연결해준다는 뜻.
@@ -433,3 +436,21 @@ class UserItem(Base):
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
     item_id = Column(String(80), primary_key=True)
     purchased_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+# EmailNotificationLog: 이메일 알림 발송 기록 겸 "중복 발송 방지 장부".
+# 서버가 여러 대 떠 있어도 (사용자, 과제, 알림종류) 유니크 제약 덕분에 같은 행은 한 번만 INSERT된다.
+# 스케줄러는 메일을 보내기 *전에* 이 행을 먼저 INSERT하고, 성공한 쪽만 메일을 보낸다.
+# 메일 발송이 실패하면 행을 지워서 다음 주기에 다시 시도하게 한다.
+# assignment_id는 과제 테이블의 PK가 아니라 프론트가 만든 과제 id(UUID, user_states 안의 값)다.
+class EmailNotificationLog(Base):
+    __tablename__ = "email_notification_logs"
+    __table_args__ = (
+        UniqueConstraint("user_id", "assignment_id", "kind", name="uq_email_notification_logs_user_assignment_kind"),
+    )
+
+    id = Column(Integer, primary_key=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    assignment_id = Column(String(64), nullable=False)
+    kind = Column(String(40), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())

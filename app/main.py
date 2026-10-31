@@ -14,6 +14,8 @@
 #      하나의 앱으로 조립해서 등록한다
 # =============================================================================
 
+from contextlib import asynccontextmanager
+
 # FastAPI 라이브러리에서 가져옴 — FastAPI: 웹 애플리케이션 객체를 만드는 핵심 클래스
 from fastapi import FastAPI
 # 시작 시 컬럼 보강용 raw SQL 실행에 사용
@@ -42,6 +44,7 @@ from app.middleware import register_request_logging
 from app.database import Base, engine
 # app/routers 폴더 안의 라우터 모듈들을 가져온다. 각 모듈 안에는 APIRouter로 만든
 # router 객체가 하나씩 들어있다 (예: auth.router, chat.router 등).
+from app.services.deadline_scheduler import DeadlineScheduler
 from app.routers import auth, chat, dashboard, documents, quiz, schedule, shop, state, subjects
 
 # configure_logging(): 이 파일(main.py)이 임포트되는 시점에 가장 먼저 실행되어야 한다.
@@ -63,10 +66,21 @@ with engine.begin() as _conn:
     _conn.execute(text("ALTER TABLE notifications ADD COLUMN IF NOT EXISTS email_sent BOOLEAN NOT NULL DEFAULT false"))
     _conn.execute(text("ALTER TABLE documents ADD COLUMN IF NOT EXISTS subject_ref VARCHAR(64)"))
     _conn.execute(text("ALTER TABLE email_verifications ADD COLUMN IF NOT EXISTS verified BOOLEAN NOT NULL DEFAULT false"))
+    _conn.execute(text("ALTER TABLE users ADD COLUMN IF NOT EXISTS deadline_email_enabled BOOLEAN NOT NULL DEFAULT true"))
 
 # FastAPI 애플리케이션 객체 생성. title="Siso API"는 자동 생성되는 API 문서(/docs)의
 # 제목으로 표시된다.
-app = FastAPI(title="Siso API")
+# 서버가 켜질 때 과제 마감 알림 스케줄러를 띄우고, 꺼질 때 멈춘다. (SCHEDULER_ENABLED=false면 아무것도 안 함)
+# 서버가 여러 대여도 중복 발송은 DB의 email_notification_logs 유니크 제약이 막는다.
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    scheduler = DeadlineScheduler()
+    scheduler.start()
+    yield
+    scheduler.stop()
+
+
+app = FastAPI(title="Siso API", lifespan=lifespan)
 
 # CORS 미들웨어 등록 — 모든 요청/응답에 공통으로 적용되는 처리 계층을 추가하는 것.
 # allow_origins는 더 이상 "*"(전체 허용)를 쓰지 않고, settings.allowed_origins_list

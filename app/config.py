@@ -71,6 +71,11 @@ class Settings(BaseSettings):
     email_from_name: str = "MORAM"
     email_enabled: bool = False
 
+    # 과제 마감 알림 스케줄러. 서버를 여러 대 띄워도 중복 발송은 DB(email_notification_logs)가 막는다.
+    # SCHEDULER_ENABLED=false 로 이 서버에서만 끌 수 있다. 기본은 켜짐.
+    scheduler_enabled: bool = True
+    scheduler_interval_seconds: int = 300
+
     # model_config: BaseSettings의 동작을 세부 설정하는 부분.
     # - env_file=".env": 프로젝트 루트의 .env 파일을 읽어서 위 필드들을 채우라는 뜻.
     # - extra="ignore": .env 파일에 위 필드에 없는 값이 더 있어도 에러 내지 말고 무시하라는 뜻.

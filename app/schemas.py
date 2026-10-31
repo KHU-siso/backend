@@ -74,6 +74,7 @@ class UserOut(BaseModel):
     email: EmailStr
     nickname: str
     created_at: datetime
+    deadline_email_enabled: bool = True
 
 
 # TokenOut: 회원가입/로그인 성공 시 응답 형태. 로그인 토큰과 유저 정보를 함께 내려준다.
@@ -347,6 +348,11 @@ class WrongNoteOut(BaseModel):
 # UserUpdate: 내 정보 수정(PATCH /api/auth/me)의 요청 body.
 class UserUpdate(BaseModel):
     nickname: str = Field(min_length=1, max_length=50)
+
+
+# NotificationSettingsUpdate: 이메일 알림 설정 변경(PATCH /api/auth/me/notification-settings)의 요청 body.
+class NotificationSettingsUpdate(BaseModel):
+    deadline_email_enabled: bool
 
 
 # PasswordChange: 비밀번호 변경(POST /api/auth/password)의 요청 body.
