@@ -374,6 +374,9 @@ class CharacterState(Base):
     # mood: "happy"/"sad"/"neutral" 중 하나만 저장된다 (검증은 schemas.py의 Literal에서).
     mood = Column(String(20), default="neutral", nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    # signup_bonus_granted: 가입 축하 코인을 이미 지급했는지. 지급 시 이 값이 false인 행만 조건부 UPDATE 하므로
+    # 어떤 경로로 여러 번 호출돼도 계정당 한 번만 지급된다.
+    signup_bonus_granted = Column(Boolean, nullable=False, default=False, server_default="false")
 
     user = relationship("User", back_populates="character_state")
 

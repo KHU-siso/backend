@@ -41,6 +41,7 @@ from app.deps import get_current_user, get_db
 # app/models.py: SQLAlchemy ORM 모델. User 클래스는 PostgreSQL의 users 테이블과 1:1로 매핑됨
 from app.config import settings
 from app.models import EmailVerification, User
+from app.services.coin_service import grant_signup_bonus
 from app.services.email_service import send_verification_email
 
 # app/schemas.py: Pydantic 모델. API 요청/응답 데이터의 "형태(스펙)"를 정의하고 자동 검증해줌
@@ -188,6 +189,8 @@ def signup(payload: UserCreate, db: Session = Depends(get_db)):
         hashed_password=hash_password(payload.password),
     )
     db.add(user)      # 방금 만든 user 객체를 이번 DB 세션의 "저장 대기 목록"에 추가 (아직 DB에는 안 씀)
+    db.flush()         # user.id를 먼저 받아서, 가입 축하 코인을 같은 트랜잭션에서 함께 확정한다
+    grant_signup_bonus(db, user.id)
     db.commit()        # 대기 중인 변경사항을 실제로 PostgreSQL에 INSERT 쿼리로 확정 저장
     db.refresh(user)   # DB가 자동으로 채워준 값(자동증가 id, created_at 기본값 등)을 user 객체에 다시 읽어와 채움
 

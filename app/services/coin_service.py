@@ -13,6 +13,7 @@
 from datetime import date
 
 # SQLAlchemy ORM 세션 타입
+from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 # app/models.py: 캐릭터 상태/과제/과목/알림 ORM 모델
@@ -102,3 +103,24 @@ def update_mood_on_incomplete(user_id: int, db: Session) -> CharacterState:
         db.commit()
         db.refresh(character)
     return character
+
+
+SIGNUP_BONUS_COINS = 20
+
+
+def grant_signup_bonus(db: Session, user_id: int) -> bool:
+    """가입 축하 코인(SIGNUP_BONUS_COINS)을 계정당 한 번만 지급한다. 지급했으면 True.
+
+    commit은 호출한 쪽에서 한다(가입 트랜잭션에 함께 묶기 위해).
+    "signup_bonus_granted = false 인 행만" 조건부 UPDATE 하므로, 같은 계정에 대해 몇 번 호출하거나
+    동시에 호출해도 rowcount == 1 인 단 한 번만 코인이 늘어난다.
+    """
+    if db.query(CharacterState.id).filter(CharacterState.user_id == user_id).first() is None:
+        db.add(CharacterState(user_id=user_id))
+        db.flush()
+    result = db.execute(
+        update(CharacterState)
+        .where(CharacterState.user_id == user_id, CharacterState.signup_bonus_granted.is_(False))
+        .values(coin_balance=CharacterState.coin_balance + SIGNUP_BONUS_COINS, signup_bonus_granted=True)
+    )
+    return result.rowcount == 1
