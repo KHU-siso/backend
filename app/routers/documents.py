@@ -22,7 +22,8 @@ from pathlib import Path  # 파일 경로를 다루는 타입
 # - HTTPException, status: 에러 응답
 # - UploadFile: 업로드된 파일(멀티파트 폼 데이터)을 나타내는 FastAPI 전용 타입.
 #   file.filename(원본 파일명), file.content_type(MIME 타입), file.file(실제 파일 스트림) 등을 제공한다.
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, Form, HTTPException, UploadFile, status
+from fastapi.responses import FileResponse
 # SQLAlchemy ORM 세션 타입
 from sqlalchemy.orm import Session
 
@@ -68,6 +69,7 @@ UPLOAD_CHUNK_SIZE = 1024 * 1024  # 1MB
 @router.post("/upload", response_model=DocumentOut, status_code=status.HTTP_201_CREATED)
 def upload_document(
     file: UploadFile,
+    subject_ref: str | None = Form(default=None, max_length=64),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
@@ -133,6 +135,7 @@ def upload_document(
         storage_path=str(stored_path),
         num_pages=num_pages,
         num_chars=len(text),
+        subject_ref=subject_ref,
     )
     db.add(document)  # 저장 대기 목록에 추가
     # db.flush(): commit 전이지만, DB에 SQL을 미리 실행시켜서 document.id 같은
@@ -223,3 +226,16 @@ def _get_owned_document(db: Session, document_id: int, user_id: int) -> Document
     if document is None or document.user_id != user_id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
     return document
+
+
+@router.get("/{document_id}/file")
+def download_document(
+    document_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    document = _get_owned_document(db, document_id, current_user.id)
+    path = Path(document.storage_path)
+    if not path.exists():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="파일을 찾을 수 없습니다.")
+    return FileResponse(path, media_type="application/pdf", filename=document.filename, content_disposition_type="inline")

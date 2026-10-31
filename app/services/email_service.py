@@ -32,7 +32,7 @@ def send_review_email(to_email: str, user_name: str, subject_name: str, message:
         return False
 
     try:
-        subject = f"[시소] {subject_name} 복습할 시간이에요"
+        subject = f"[MORAM] {subject_name} 복습할 시간이에요"
         text_body = (
             f"{user_name}님, 안녕하세요!\n\n"
             f"{message}\n\n"
@@ -64,4 +64,38 @@ def send_review_email(to_email: str, user_name: str, subject_name: str, message:
         return True
     except Exception as exc:  # 어떤 오류든 밖으로 던지지 않는다 (비밀번호가 담길 수 있는 상세 내용은 남기지 않음)
         logger.error("복습 알림 메일 발송 실패: to=%s, error=%s", to_email, type(exc).__name__)
+        return False
+
+
+def send_verification_email(to_email: str, code: str, expire_minutes: int) -> bool:
+    """회원가입 인증 코드 메일을 보낸다. 성공하면 True, 설정 누락/발송 실패면 False."""
+    if not settings.email_enabled or not settings.smtp_user or not settings.smtp_password:
+        logger.warning("인증 메일 발송 불가: EMAIL_ENABLED/SMTP_USER/SMTP_PASSWORD 설정을 확인하세요")
+        return False
+
+    try:
+        msg = EmailMessage()
+        msg["Subject"] = "[MORAM] 이메일 인증 코드"
+        msg["From"] = formataddr((settings.email_from_name, settings.smtp_user))
+        msg["To"] = to_email
+        msg.set_content(
+            f"MORAM 회원가입 인증 코드입니다.\n\n인증 코드: {code}\n\n"
+            f"{expire_minutes}분 안에 입력해 주세요.\n\n본인이 요청하지 않았다면 이 메일을 무시하세요.\n"
+        )
+        msg.add_alternative(
+            "<div style=\"font-family:sans-serif;line-height:1.6;color:#222\">"
+            "<p>MORAM 회원가입 인증 코드입니다.</p>"
+            f"<p style=\"font-size:28px;letter-spacing:6px;font-weight:700\">{escape(code)}</p>"
+            f"<p>{expire_minutes}분 안에 입력해 주세요. 본인이 요청하지 않았다면 이 메일을 무시하세요.</p>"
+            "</div>",
+            subtype="html",
+        )
+        with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=SMTP_TIMEOUT_SECONDS) as server:
+            server.starttls()
+            server.login(settings.smtp_user, settings.smtp_password)
+            server.send_message(msg)
+        logger.info("인증 메일 발송 완료: to=%s", to_email)
+        return True
+    except Exception as exc:
+        logger.error("인증 메일 발송 실패: to=%s, error=%s", to_email, type(exc).__name__)
         return False

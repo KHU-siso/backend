@@ -1,0 +1,432 @@
+{
+ "color-lime": {
+  "price": 6,
+  "available": true,
+  "default": false
+ },
+ "color-white": {
+  "price": 0,
+  "available": true,
+  "default": true
+ },
+ "color-lavender": {
+  "price": 6,
+  "available": true,
+  "default": false
+ },
+ "color-yellow": {
+  "price": 6,
+  "available": true,
+  "default": false
+ },
+ "color-pink": {
+  "price": 6,
+  "available": true,
+  "default": false
+ },
+ "color-mint": {
+  "price": 6,
+  "available": true,
+  "default": false
+ },
+ "cream-bear-hoodie": {
+  "price": 14,
+  "available": true,
+  "default": false
+ },
+ "red-varsity-jacket": {
+  "price": 16,
+  "available": true,
+  "default": false
+ },
+ "blue-collar-jacket": {
+  "price": 14,
+  "available": true,
+  "default": false
+ },
+ "gray-check-jacket": {
+  "price": 15,
+  "available": true,
+  "default": false
+ },
+ "yellow-hoodie": {
+  "price": 13,
+  "available": true,
+  "default": false
+ },
+ "brown-toggle-coat": {
+  "price": 18,
+  "available": true,
+  "default": false
+ },
+ "beige-brim-hat": {
+  "price": 10,
+  "available": false,
+  "default": false
+ },
+ "blue-headphones": {
+  "price": 12,
+  "available": true,
+  "default": false
+ },
+ "gray-earflap-hat": {
+  "price": 12,
+  "available": true,
+  "default": false
+ },
+ "red-beret": {
+  "price": 8,
+  "available": true,
+  "default": false
+ },
+ "blue-cap": {
+  "price": 8,
+  "available": true,
+  "default": false
+ },
+ "cream-bonnet": {
+  "price": 11,
+  "available": true,
+  "default": false
+ },
+ "bear-hood": {
+  "price": 12,
+  "available": true,
+  "default": false
+ },
+ "green-bow": {
+  "price": 5,
+  "available": true,
+  "default": false
+ },
+ "classic-buttons": {
+  "price": 7,
+  "available": true,
+  "default": false
+ },
+ "round-glasses": {
+  "price": 8,
+  "available": true,
+  "default": false
+ },
+ "black-shoes": {
+  "price": 8,
+  "available": true,
+  "default": false
+ },
+ "cream-scarf": {
+  "price": 6,
+  "available": true,
+  "default": false
+ },
+ "red-bag": {
+  "price": 9,
+  "available": true,
+  "default": false
+ },
+ "pastel-blue-ong-cap": {
+  "price": 8,
+  "available": true,
+  "default": false
+ },
+ "pastel-yellow-ong-bucket-hat": {
+  "price": 8,
+  "available": true,
+  "default": false
+ },
+ "pastel-purple-pom-beanie": {
+  "price": 8,
+  "available": true,
+  "default": false
+ },
+ "pastel-cream-bear-cap": {
+  "price": 8,
+  "available": true,
+  "default": false
+ },
+ "pastel-green-ong-cap": {
+  "price": 8,
+  "available": true,
+  "default": false
+ },
+ "pastel-pink-ribbon-cap": {
+  "price": 8,
+  "available": true,
+  "default": false
+ },
+ "pastel-navy-ong-cap": {
+  "price": 8,
+  "available": true,
+  "default": false
+ },
+ "pastel-blue-earflap-hat": {
+  "price": 8,
+  "available": true,
+  "default": false
+ },
+ "pastel-pink-cat-headband": {
+  "price": 8,
+  "available": true,
+  "default": false
+ },
+ "pastel-yellow-rabbit-headband": {
+  "price": 8,
+  "available": true,
+  "default": false
+ },
+ "pastel-red-backward-cap": {
+  "price": 8,
+  "available": true,
+  "default": false
+ },
+ "pastel-blue-bear-beanie": {
+  "price": 8,
+  "available": true,
+  "default": false
+ },
+ "pastel-black-cat-beanie": {
+  "price": 8,
+  "available": true,
+  "default": false
+ },
+ "pastel-brown-aviator-hat": {
+  "price": 8,
+  "available": true,
+  "default": false
+ },
+ "pastel-pink-hair-bow": {
+  "price": 5,
+  "available": true,
+  "default": false
+ },
+ "pastel-red-hair-bow": {
+  "price": 5,
+  "available": true,
+  "default": false
+ },
+ "pastel-yellow-hair-bow": {
+  "price": 5,
+  "available": true,
+  "default": false
+ },
+ "pastel-purple-hair-bow": {
+  "price": 5,
+  "available": true,
+  "default": false
+ },
+ "pastel-blue-hair-bow": {
+  "price": 5,
+  "available": true,
+  "default": false
+ },
+ "pastel-daisy-badge": {
+  "price": 4,
+  "available": true,
+  "default": false
+ },
+ "pastel-blossom-badge": {
+  "price": 4,
+  "available": true,
+  "default": false
+ },
+ "pastel-cherry-badge": {
+  "price": 4,
+  "available": true,
+  "default": false
+ },
+ "pastel-star-badge": {
+  "price": 4,
+  "available": true,
+  "default": false
+ },
+ "pastel-heart-badge": {
+  "price": 4,
+  "available": true,
+  "default": false
+ },
+ "pastel-snowflake-badge": {
+  "price": 4,
+  "available": true,
+  "default": false
+ },
+ "pastel-clover-badge": {
+  "price": 4,
+  "available": true,
+  "default": false
+ },
+ "pastel-carrot-badge": {
+  "price": 4,
+  "available": true,
+  "default": false
+ },
+ "pastel-ong-badge": {
+  "price": 4,
+  "available": true,
+  "default": false
+ },
+ "pastel-cherry-cardigan": {
+  "price": 14,
+  "available": true,
+  "default": false
+ },
+ "pastel-red-collar-cardigan": {
+  "price": 14,
+  "available": true,
+  "default": false
+ },
+ "pastel-navy-sailor-top": {
+  "price": 14,
+  "available": true,
+  "default": false
+ },
+ "pastel-pink-heart-sweater": {
+  "price": 14,
+  "available": true,
+  "default": false
+ },
+ "pastel-green-ong-varsity": {
+  "price": 14,
+  "available": true,
+  "default": false
+ },
+ "pastel-cream-bear-bag-hoodie": {
+  "price": 14,
+  "available": true,
+  "default": false
+ },
+ "pastel-navy-scarf-coat": {
+  "price": 14,
+  "available": true,
+  "default": false
+ },
+ "pastel-blue-cloud-sweater": {
+  "price": 14,
+  "available": true,
+  "default": false
+ },
+ "pastel-cream-stripe-sweater": {
+  "price": 14,
+  "available": true,
+  "default": false
+ },
+ "pastel-cream-ong-bag": {
+  "price": 9,
+  "available": true,
+  "default": false
+ },
+ "pastel-yellow-star-bag": {
+  "price": 9,
+  "available": true,
+  "default": false
+ },
+ "pastel-purple-ong-backpack": {
+  "price": 9,
+  "available": true,
+  "default": false
+ },
+ "pastel-blue-ong-bag": {
+  "price": 9,
+  "available": true,
+  "default": false
+ },
+ "pastel-brown-bear-bag": {
+  "price": 9,
+  "available": true,
+  "default": false
+ },
+ "pastel-pink-heart-bag": {
+  "price": 9,
+  "available": true,
+  "default": false
+ },
+ "pastel-black-ong-bag": {
+  "price": 9,
+  "available": true,
+  "default": false
+ },
+ "pastel-cream-bow-tote": {
+  "price": 9,
+  "available": true,
+  "default": false
+ },
+ "pastel-green-frog-bag": {
+  "price": 9,
+  "available": true,
+  "default": false
+ },
+ "pastel-blue-fringe-scarf": {
+  "price": 6,
+  "available": true,
+  "default": false
+ },
+ "pastel-red-fringe-scarf": {
+  "price": 6,
+  "available": true,
+  "default": false
+ },
+ "pastel-yellow-check-scarf": {
+  "price": 6,
+  "available": true,
+  "default": false
+ },
+ "pastel-purple-scarf": {
+  "price": 6,
+  "available": true,
+  "default": false
+ },
+ "pastel-pink-heart-scarf": {
+  "price": 6,
+  "available": true,
+  "default": false
+ },
+ "pastel-navy-stripe-scarf": {
+  "price": 6,
+  "available": true,
+  "default": false
+ },
+ "pastel-cream-fur-neck-ribbon": {
+  "price": 6,
+  "available": true,
+  "default": false
+ },
+ "pastel-red-bow-tie": {
+  "price": 6,
+  "available": true,
+  "default": false
+ },
+ "pastel-red-round-glasses": {
+  "price": 8,
+  "available": true,
+  "default": false
+ },
+ "pastel-yellow-frame-glasses": {
+  "price": 8,
+  "available": true,
+  "default": false
+ },
+ "pastel-purple-cat-sunglasses": {
+  "price": 8,
+  "available": true,
+  "default": false
+ },
+ "pastel-pink-heart-sunglasses": {
+  "price": 8,
+  "available": true,
+  "default": false
+ },
+ "pastel-silver-round-glasses": {
+  "price": 8,
+  "available": true,
+  "default": false
+ },
+ "pastel-blue-sunglasses": {
+  "price": 8,
+  "available": true,
+  "default": false
+ },
+ "pastel-white-cat-glasses": {
+  "price": 8,
+  "available": true,
+  "default": false
+ }
+}

@@ -45,6 +45,17 @@ class UserCreate(BaseModel):
     nickname: str
 
 
+# SendCodeRequest: 인증 코드 발송(POST /api/auth/send-code)의 요청 body.
+class SendCodeRequest(BaseModel):
+    email: EmailStr
+
+
+# VerifyCodeRequest: 인증 코드 확인(POST /api/auth/email/verify-code)의 요청 body.
+class VerifyCodeRequest(BaseModel):
+    email: EmailStr
+    code: str
+
+
 # UserLogin: 로그인 API(POST /api/auth/login)의 요청 body 형태.
 class UserLogin(BaseModel):
     email: EmailStr
@@ -82,6 +93,7 @@ class DocumentOut(BaseModel):
     filename: str
     num_pages: int
     num_chars: int
+    subject_ref: str | None = None
     created_at: datetime
 
 
@@ -325,3 +337,34 @@ class WrongNoteOut(BaseModel):
     correct_answer: str
     explanation: str
     answered_at: datetime
+    quiz_type: str = ""
+    subject_ref: str | None = None
+    attempts: int = 1  # 이 문제를 틀린 횟수
+    resolved: bool = False  # 틀린 뒤 다시 풀어 맞혔는지
+
+
+
+# UserUpdate: 내 정보 수정(PATCH /api/auth/me)의 요청 body.
+class UserUpdate(BaseModel):
+    nickname: str = Field(min_length=1, max_length=50)
+
+
+# PasswordChange: 비밀번호 변경(POST /api/auth/password)의 요청 body.
+class PasswordChange(BaseModel):
+    current_password: str
+    new_password: str = Field(min_length=5)
+
+
+# ShopStateOut: 코인샵 상태(코인 잔액, 보유 아이템, 착용 상태).
+class ShopStateOut(BaseModel):
+    coin_balance: int
+    owned_item_ids: list[str]
+    equipped_items: dict[str, str]
+
+
+class BuyRequest(BaseModel):
+    item_id: str
+
+
+class EquipRequest(BaseModel):
+    equipped_items: dict[str, str]

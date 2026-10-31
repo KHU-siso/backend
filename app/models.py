@@ -107,6 +107,8 @@ class Document(Base):
     # num_pages: PDF의 총 페이지 수 (pdf_service.extract_text에서 계산)
     num_pages = Column(Integer, default=0)
     # num_chars: 추출된 전체 텍스트 글자 수 (통계/표시용)
+    # subject_ref: 프론트 과목 ID(문자열). 이 자료가 어느 과목에 속하는지 나타낸다.
+    subject_ref = Column(String(64), nullable=True, index=True)
     num_chars = Column(Integer, default=0)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -397,3 +399,37 @@ class Notification(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     user = relationship("User", back_populates="notifications")
+
+
+# EmailVerification: 회원가입 이메일 인증 코드. 이메일당 한 행만 유지하며(재전송 시 덮어씀),
+# 코드 원문은 저장하지 않고 HMAC 해시만 저장한다.
+class EmailVerification(Base):
+    __tablename__ = "email_verifications"
+
+    email = Column(String, primary_key=True)
+    code_hash = Column(String, nullable=False)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    sent_at = Column(DateTime(timezone=True), nullable=False)
+    attempts = Column(Integer, nullable=False, default=0)
+    # verified: 코드 확인을 마친 이메일인지. 가입(signup)은 이 값이 True인 이메일만 허용한다.
+    verified = Column(Boolean, nullable=False, default=False, server_default="false")
+
+
+# UserState: 사용자별 JSON 문서 저장소. 프론트가 한 덩어리로 다루는 과목/노트/시험/출결,
+# 프로필·알림 설정, 오답 북마크, 착용 상태 등을 key별로 보관한다.
+class UserState(Base):
+    __tablename__ = "user_states"
+
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    key = Column(String(50), primary_key=True)
+    data = Column(JSON, nullable=False)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+# UserItem: 코인샵에서 구매한 아이템(보유 목록).
+class UserItem(Base):
+    __tablename__ = "user_items"
+
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    item_id = Column(String(80), primary_key=True)
+    purchased_at = Column(DateTime(timezone=True), server_default=func.now())

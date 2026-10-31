@@ -19,10 +19,16 @@
 # - Depends: "의존성 주입" 기능. 함수 실행 전에 다른 함수(예: DB 세션 생성)를 먼저 실행시켜 결과를 넣어줌
 # - HTTPException: 에러가 발생했을 때 상태코드 + 메시지를 담아 클라이언트에 응답하기 위한 예외 클래스
 # - status: 200, 401, 404 같은 HTTP 상태코드를 숫자 대신 이름으로 쓸 수 있게 해주는 상수 모음
-from fastapi import APIRouter, Depends, HTTPException, status
+import hashlib
+import hmac
+import secrets
+from datetime import datetime, timedelta, timezone
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 # SQLAlchemy(ORM) 라이브러리에서 가져옴
 # - Session: DB와 대화하는 "세션" 객체의 타입. 이 타입으로 힌트를 달아두면 자동완성/타입체크가 잘 됨
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 # ---- 아래부터는 우리 프로젝트 내부 모듈들 ----
@@ -33,14 +39,16 @@ from sqlalchemy.orm import Session
 from app.deps import get_current_user, get_db
 
 # app/models.py: SQLAlchemy ORM 모델. User 클래스는 PostgreSQL의 users 테이블과 1:1로 매핑됨
-from app.models import User
+from app.config import settings
+from app.models import EmailVerification, User
+from app.services.email_service import send_verification_email
 
 # app/schemas.py: Pydantic 모델. API 요청/응답 데이터의 "형태(스펙)"를 정의하고 자동 검증해줌
 #   - UserCreate: 회원가입 요청 body 형태 (email, password, nickname)
 #   - UserLogin: 로그인 요청 body 형태 (email, password)
 #   - TokenOut: 로그인/회원가입 성공 시 응답 형태 (토큰 + 유저 정보)
 #   - UserOut: 유저 정보를 외부에 보여줄 때의 형태 (비밀번호 해시 같은 민감정보는 제외됨)
-from app.schemas import TokenOut, UserCreate, UserLogin, UserOut
+from app.schemas import SendCodeRequest, TokenOut, UserCreate, UserLogin, UserOut, VerifyCodeRequest, UserUpdate, PasswordChange
 
 # app/security.py: 비밀번호 해시/검증, JWT 토큰 생성 함수들
 #   - create_access_token: 로그인 상태를 증명하는 JWT 토큰 문자열을 만듦
@@ -68,18 +76,111 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 # - 무슨 기능을 하나: 이메일 중복 체크 → 비밀번호 해싱 → 새 유저 저장(DB) → 로그인 토큰 발급.
 # - 어떤 상황에 쓰이나: 프론트엔드의 "회원가입" 화면에서 이메일/비밀번호/이름을 입력하고
 #   제출 버튼을 눌렀을 때 이 엔드포인트가 호출된다.
+
+
+# --- 이메일 인증 -------------------------------------------------------------
+ALLOWED_EMAIL_DOMAIN = "khu.ac.kr"
+CODE_EXPIRE_MINUTES = 5
+RESEND_COOLDOWN_SECONDS = 60
+MAX_CODE_ATTEMPTS = 5
+VERIFIED_VALID_MINUTES = 30
+
+
+def _hash_code(email: str, code: str) -> str:
+    return hmac.new(settings.jwt_secret_key.encode(), f"{email}:{code}".encode(), hashlib.sha256).hexdigest()
+
+
+def _is_khu_email(email: str) -> bool:
+    return email.lower().endswith("@" + ALLOWED_EMAIL_DOMAIN)
+
+
+def _nickname_taken(db: Session, nickname: str) -> bool:
+    return db.query(User).filter(func.lower(User.nickname) == nickname.strip().lower()).first() is not None
+
+
+@router.get("/nickname/check")
+def check_nickname(nickname: str = Query(min_length=1, max_length=50), db: Session = Depends(get_db)):
+    return {"available": not _nickname_taken(db, nickname)}
+
+
+@router.post("/email/send-code", status_code=status.HTTP_204_NO_CONTENT)
+def send_code(payload: SendCodeRequest, db: Session = Depends(get_db)):
+    email = payload.email.lower()
+    if not _is_khu_email(email):
+        raise HTTPException(status_code=400, detail="경희대학교 이메일(@khu.ac.kr)만 사용할 수 있습니다.")
+    if db.query(User).filter(User.email == email).first():
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="이미 가입된 이메일입니다.")
+
+    now = datetime.now(timezone.utc)
+    record = db.get(EmailVerification, email)
+    if record and (now - record.sent_at).total_seconds() < RESEND_COOLDOWN_SECONDS:
+        raise HTTPException(status_code=429, detail="잠시 후 다시 요청해 주세요. (재전송은 60초에 한 번만 가능합니다.)")
+
+    code = f"{secrets.randbelow(1_000_000):06d}"
+    if record is None:
+        record = EmailVerification(email=email)
+        db.add(record)
+    record.code_hash = _hash_code(email, code)
+    record.expires_at = now + timedelta(minutes=CODE_EXPIRE_MINUTES)
+    record.sent_at = now
+    record.attempts = 0
+    record.verified = False
+    db.commit()
+
+    if not send_verification_email(email, code, CODE_EXPIRE_MINUTES):
+        raise HTTPException(status_code=503, detail="인증 메일을 보내지 못했습니다. 잠시 후 다시 시도해 주세요.")
+
+
+@router.post("/email/verify-code", status_code=status.HTTP_204_NO_CONTENT)
+def verify_code(payload: VerifyCodeRequest, db: Session = Depends(get_db)):
+    email = payload.email.lower()
+    record = db.get(EmailVerification, email)
+    if record is None:
+        raise HTTPException(status_code=400, detail="먼저 인증 코드를 요청해 주세요.")
+    if record.verified:
+        return
+    if datetime.now(timezone.utc) > record.expires_at:
+        raise HTTPException(status_code=400, detail="인증 코드가 만료되었습니다. 코드를 다시 받아 주세요.")
+    if not hmac.compare_digest(record.code_hash, _hash_code(email, payload.code.strip())):
+        record.attempts += 1
+        if record.attempts >= MAX_CODE_ATTEMPTS:
+            db.delete(record)  # 5회 틀리면 코드 폐기
+            db.commit()
+            raise HTTPException(status_code=400, detail="5회 틀려 인증 코드가 폐기되었습니다. 코드를 다시 받아 주세요.")
+        db.commit()
+        raise HTTPException(status_code=400, detail=f"인증 코드가 올바르지 않습니다. ({record.attempts}/{MAX_CODE_ATTEMPTS})")
+    # 인증 완료: 이후 VERIFIED_VALID_MINUTES 안에 가입해야 한다.
+    record.verified = True
+    record.expires_at = datetime.now(timezone.utc) + timedelta(minutes=VERIFIED_VALID_MINUTES)
+    db.commit()
+
+
+def _consume_verification(db: Session, email: str) -> None:
+    """가입 직전 호출: 인증을 마친(그리고 아직 유효한) 이메일인지 확인하고 기록을 지운다."""
+    record = db.get(EmailVerification, email)
+    if record is None or not record.verified or datetime.now(timezone.utc) > record.expires_at:
+        raise HTTPException(status_code=400, detail="이메일 인증이 필요합니다.")
+    db.delete(record)
+
+
+
 @router.post("/signup", response_model=TokenOut, status_code=status.HTTP_201_CREATED)
 def signup(payload: UserCreate, db: Session = Depends(get_db)):
     # db.query(User).filter(...).first()
     #   → SQLAlchemy ORM 문법으로 "SELECT * FROM users WHERE email = 입력한이메일 LIMIT 1"과 같은 효과.
     #   → 결과가 있으면(=이미 가입된 이메일) User 객체가, 없으면 None이 반환된다.
-    if db.query(User).filter(User.email == payload.email).first():
-        # 이미 같은 이메일로 가입된 유저가 있으면 409 Conflict(충돌) 에러를 응답하고 함수 실행을 즉시 종료한다.
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
+    email = payload.email.lower()
+    if not _is_khu_email(email):
+        raise HTTPException(status_code=400, detail="경희대학교 이메일(@khu.ac.kr)만 사용할 수 있습니다.")
+    if db.query(User).filter(User.email == email).first():
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="이미 가입된 이메일입니다.")
+    if _nickname_taken(db, payload.nickname):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="이미 사용 중인 닉네임입니다.")
+    _consume_verification(db, email)
 
     # 새로운 User ORM 객체를 파이썬 메모리 상에서만 생성 (아직 DB에 저장된 건 아님)
     user = User(
-        email=payload.email,
+        email=email,
         nickname=payload.nickname,
         # hash_password(payload.password): 평문 비밀번호를 그대로 저장하면 위험하므로,
         # bcrypt 알고리즘으로 되돌릴 수 없는 해시 문자열로 바꿔서 저장한다.
@@ -148,3 +249,24 @@ def me(current_user: User = Depends(get_current_user)):
     # get_current_user가 이미 DB에서 찾아준 User 객체를 그대로 반환한다.
     # response_model=UserOut 설정 덕분에 FastAPI가 자동으로 UserOut 형태(민감정보 제외)로 변환해서 응답한다.
     return current_user
+
+
+@router.patch("/me", response_model=UserOut)
+def update_me(payload: UserUpdate, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    nickname = payload.nickname.strip()
+    if not nickname:
+        raise HTTPException(status_code=400, detail="닉네임을 입력해주세요.")
+    if nickname.lower() != current_user.nickname.lower() and _nickname_taken(db, nickname):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="이미 사용 중인 닉네임입니다.")
+    current_user.nickname = nickname
+    db.commit()
+    db.refresh(current_user)
+    return current_user
+
+
+@router.post("/password", status_code=status.HTTP_204_NO_CONTENT)
+def change_password(payload: PasswordChange, current_user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    if not verify_password(payload.current_password, current_user.hashed_password):
+        raise HTTPException(status_code=400, detail="현재 비밀번호가 올바르지 않습니다.")
+    current_user.hashed_password = hash_password(payload.new_password)
+    db.commit()

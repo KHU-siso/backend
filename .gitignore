@@ -5,3 +5,4 @@ venv/
 .env
 uploads/
 chroma_db/
+.venv312/

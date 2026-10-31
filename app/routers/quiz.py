@@ -254,23 +254,44 @@ def list_wrong_notes(current_user: User = Depends(get_current_user), db: Session
         .all()
     )
 
-    return [
-        WrongNoteOut(
-            quiz_question_id=attempt.quiz_question_id,
-            quiz_set_id=attempt.question.quiz_set_id,
-            question_text=attempt.question.question_text,
-            options=attempt.question.options,
-            user_answer=attempt.user_answer,
-            correct_answer=attempt.question.correct_answer,
-            explanation=attempt.question.explanation,
-            answered_at=attempt.answered_at,
+    notes = []
+    for attempt in wrong_attempts:
+        question = attempt.question
+        latest = (
+            db.query(QuizAttempt)
+            .filter(QuizAttempt.quiz_question_id == question.id, QuizAttempt.user_id == current_user.id)
+            .order_by(QuizAttempt.id.desc())
+            .first()
         )
-        for attempt in wrong_attempts
-    ]
+        wrong_count = (
+            db.query(func.count(QuizAttempt.id))
+            .filter(
+                QuizAttempt.quiz_question_id == question.id,
+                QuizAttempt.user_id == current_user.id,
+                QuizAttempt.is_correct.is_(False),
+            )
+            .scalar()
+        )
+        document = question.quiz_set.document if hasattr(question.quiz_set, "document") else None
+        notes.append(
+            WrongNoteOut(
+                quiz_question_id=question.id,
+                quiz_set_id=question.quiz_set_id,
+                question_text=question.question_text,
+                options=question.options,
+                user_answer=attempt.user_answer,
+                correct_answer=question.correct_answer,
+                explanation=question.explanation,
+                answered_at=attempt.answered_at,
+                quiz_type=question.quiz_set.quiz_type,
+                subject_ref=document.subject_ref if document else None,
+                attempts=wrong_count,
+                resolved=bool(latest and latest.is_correct),
+            )
+        )
+    return notes
 
 
-# _get_owned_quiz_set: "이 quiz_set_id가 실제로 존재하고, 요청한 유저의 것이 맞는지" 확인하는
-# 내부 헬퍼 함수. documents.py의 _get_owned_document와 동일한 패턴이다.
 def _get_owned_quiz_set(db: Session, quiz_set_id: int, user_id: int) -> QuizSet:
     quiz_set = db.get(QuizSet, quiz_set_id)
     if quiz_set is None or quiz_set.user_id != user_id:

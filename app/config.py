@@ -68,7 +68,7 @@ class Settings(BaseSettings):
     smtp_port: int = 587
     smtp_user: str | None = None
     smtp_password: str | None = None
-    email_from_name: str = "시소"
+    email_from_name: str = "MORAM"
     email_enabled: bool = False
 
     # model_config: BaseSettings의 동작을 세부 설정하는 부분.

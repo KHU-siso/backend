@@ -42,7 +42,7 @@ from app.middleware import register_request_logging
 from app.database import Base, engine
 # app/routers 폴더 안의 라우터 모듈들을 가져온다. 각 모듈 안에는 APIRouter로 만든
 # router 객체가 하나씩 들어있다 (예: auth.router, chat.router 등).
-from app.routers import auth, chat, dashboard, documents, quiz, schedule, subjects
+from app.routers import auth, chat, dashboard, documents, quiz, schedule, shop, state, subjects
 
 # configure_logging(): 이 파일(main.py)이 임포트되는 시점에 가장 먼저 실행되어야 한다.
 # 이보다 늦게 부르면, 그 사이에 다른 모듈에서 이미 만들어진 로거가 아직 설정 안 된
@@ -61,6 +61,8 @@ Base.metadata.create_all(bind=engine)
 # notifications.email_sent처럼 나중에 추가된 컬럼을 이렇게 직접 보강한다 (IF NOT EXISTS라 반복 실행해도 안전).
 with engine.begin() as _conn:
     _conn.execute(text("ALTER TABLE notifications ADD COLUMN IF NOT EXISTS email_sent BOOLEAN NOT NULL DEFAULT false"))
+    _conn.execute(text("ALTER TABLE documents ADD COLUMN IF NOT EXISTS subject_ref VARCHAR(64)"))
+    _conn.execute(text("ALTER TABLE email_verifications ADD COLUMN IF NOT EXISTS verified BOOLEAN NOT NULL DEFAULT false"))
 
 # FastAPI 애플리케이션 객체 생성. title="Siso API"는 자동 생성되는 API 문서(/docs)의
 # 제목으로 표시된다.
@@ -96,6 +98,8 @@ app.include_router(documents.router)    # /api/documents/...
 app.include_router(chat.router)         # /api/chat/...
 app.include_router(subjects.router)     # /api/subjects/...
 app.include_router(quiz.router)         # /api/quiz/..., /api/wrong-notes
+app.include_router(state.router)        # /api/state/...
+app.include_router(shop.router)         # /api/shop/...
 app.include_router(schedule.router)     # /api/events/..., /api/dashboard/..., /api/notifications/..., /api/character
 
 
