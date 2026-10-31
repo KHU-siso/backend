@@ -13,6 +13,7 @@ from email.utils import formataddr
 from html import escape
 
 from app.config import settings
+from app.services.email_templates import deadline_email_html, verification_email_html
 
 logger = logging.getLogger("app.email")
 
@@ -87,14 +88,7 @@ def send_verification_email(to_email: str, code: str, expire_minutes: int) -> bo
             f"MORAM 회원가입 인증 코드입니다.\n\n인증 코드: {code}\n\n"
             f"{expire_minutes}분 안에 입력해 주세요.\n\n본인이 요청하지 않았다면 이 메일을 무시하세요.\n"
         )
-        msg.add_alternative(
-            "<div style=\"font-family:sans-serif;line-height:1.6;color:#222\">"
-            "<p>MORAM 회원가입 인증 코드입니다.</p>"
-            f"<p style=\"font-size:28px;letter-spacing:6px;font-weight:700\">{escape(code)}</p>"
-            f"<p>{expire_minutes}분 안에 입력해 주세요. 본인이 요청하지 않았다면 이 메일을 무시하세요.</p>"
-            "</div>",
-            subtype="html",
-        )
+        msg.add_alternative(verification_email_html(code, expire_minutes), subtype="html")
         with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=SMTP_TIMEOUT_SECONDS) as server:
             server.starttls()
             server.login(settings.smtp_user, settings.smtp_password)
@@ -106,7 +100,7 @@ def send_verification_email(to_email: str, code: str, expire_minutes: int) -> bo
         return False
 
 
-def send_assignment_deadline_email(to_email: str, user_name: str, subject_name: str, assignment_title: str, deadline_text: str) -> bool:
+def send_assignment_deadline_email(to_email: str, user_name: str, subject_name: str, assignment_title: str, deadline_text: str, remaining_text: str = "") -> bool:
     """과제 마감 24시간 이내 알림 메일을 보낸다. 성공하면 True, 설정 누락/발송 실패면 False."""
     if not email_configured():
         logger.warning("과제 마감 메일 발송 불가: EMAIL_ENABLED/SMTP_USER/SMTP_PASSWORD 설정을 확인하세요")
@@ -125,13 +119,7 @@ def send_assignment_deadline_email(to_email: str, user_name: str, subject_name: 
             "이 알림은 MORAM 마이페이지의 '과제 마감 알림'에서 끌 수 있어요.\n"
         )
         msg.add_alternative(
-            "<div style=\"font-family:sans-serif;line-height:1.6;color:#222\">"
-            f"<p>{escape(user_name)}님, 안녕하세요!</p>"
-            f"<p>'{escape(subject_name)}' 과목의 과제 <strong>'{escape(assignment_title)}'</strong> 마감이 24시간 안으로 다가왔어요.</p>"
-            f"<p>마감: <strong>{escape(deadline_text)}</strong></p>"
-            "<p>MORAM에서 과제 상태를 확인하고 마무리해 보세요.</p>"
-            "<p style=\"color:#888\">- MORAM 드림<br>이 알림은 MORAM 마이페이지의 '과제 마감 알림'에서 끌 수 있어요.</p>"
-            "</div>",
+            deadline_email_html(user_name, subject_name, assignment_title, deadline_text, remaining_text),
             subtype="html",
         )
         with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=SMTP_TIMEOUT_SECONDS) as server:

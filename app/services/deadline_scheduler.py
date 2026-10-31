@@ -44,6 +44,14 @@ def _deadline_at(task: dict) -> datetime | None:
         return None
 
 
+def _remaining_text(deadline: datetime, now: datetime) -> str:
+    """메일에 쓰는 남은 시간 문구. 알림 조건이 24시간 이내라 시간 단위로만 표현한다."""
+    minutes = int((deadline - now).total_seconds() // 60)
+    if minutes < 60:
+        return "마감까지 1시간도 남지 않았어요"
+    return f"마감까지 {-(-minutes // 60)}시간 남았어요"
+
+
 def _claim(db, user_id: int, assignment_id: str) -> bool:
     """발송 기록을 먼저 INSERT 한다. 내가 넣는 데 성공했을 때만 True (= 내가 보낼 차례)."""
     result = db.execute(
@@ -101,6 +109,7 @@ def run_once(now: datetime | None = None) -> int:
                         subject_name=names.get(task.get("subjectId"), "과목"),
                         assignment_title=str(task.get("title", "과제")),
                         deadline_text=deadline.astimezone(SEOUL).strftime("%Y-%m-%d %H:%M") if task.get("time") else deadline.astimezone(SEOUL).strftime("%Y-%m-%d") + " 하루 종일",
+                        remaining_text=_remaining_text(deadline, now),
                     )
                     if ok:
                         sent += 1
