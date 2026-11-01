@@ -16,13 +16,14 @@
 # =============================================================================
 
 # FastAPI에서 가져옴 — 라우터 등록, 의존성 주입, 에러 응답
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, status
 # SQLAlchemy ORM 세션 타입
 from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 # app/deps.py: 로그인 유저 조회, DB 세션 생성
+from app.config import settings
 from app.deps import get_current_user, get_db
 # app/models.py: 대화방/메시지/문서/유저 ORM 모델
 from app.models import ChatConversation, ChatMessage, Document, User
@@ -36,7 +37,7 @@ from app.schemas import (
     SubjectConversationCreate,
 )
 # services/claude_service.py: 실제 Claude API 호출 함수
-from app.services.claude_service import ask
+from app.services.claude_service import AIProviderError, ask
 # services/embedding_service.py: 텍스트를 벡터로 변환하는 함수 (질문을 검색용 벡터로 바꿀 때 사용)
 from app.services.embedding_service import embed_text
 # services/note_context_service.py: 이 과목에 내가 쓴 학습 노트를 채팅 근거로 가져오는 함수
@@ -220,7 +221,20 @@ def send_message(
     payload: MessageCreate,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
+    x_ai_provider: str | None = Header(default=None),
+    x_ai_key: str | None = Header(default=None),
 ):
+    # 사용자 본인의 AI 키(헤더). 이 값은 AI 호출에만 쓰고 DB·로그·응답 어디에도 남기지 않는다.
+    provider = (x_ai_provider or "").strip().lower() or None
+    api_key = (x_ai_key or "").strip() or None
+    if api_key:
+        if provider not in ("claude", "openai"):
+            raise AIProviderError(400, "AI_PROVIDER_INVALID", "지원하지 않는 AI 종류예요. Claude 또는 GPT를 선택해주세요.")
+    elif settings.allow_server_ai_key:
+        provider = api_key = None  # 비상 우회: 서버 키로 답한다
+    else:
+        raise AIProviderError(400, "AI_KEY_REQUIRED", "API 키를 입력해주세요.")
+
     conversation = _get_owned_conversation(db, conversation_id, current_user.id)
 
     # 이 대화방의 기존 메시지들을 Claude API가 이해하는 형태
@@ -255,7 +269,7 @@ def send_message(
 
     # ask(): services/claude_service.py 함수. 질문 + 대화 기록 + (있다면) 문서 컨텍스트를
     # Claude API로 보내고, 텍스트 답변을 받아온다.
-    answer = ask(payload.content, history, context_text)
+    answer = ask(payload.content, history, context_text, provider, api_key)
     if subject_chat:
         if not context_text:
             answer = NO_MATERIAL_NOTICE + answer

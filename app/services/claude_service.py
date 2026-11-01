@@ -8,7 +8,10 @@
 # =============================================================================
 
 # anthropic: Claude API를 파이썬에서 쉽게 호출할 수 있게 해주는 공식 SDK 라이브러리.
+import logging
+
 import anthropic
+import openai
 
 # app/config.py의 settings에서 Claude API 키와 사용할 모델 이름을 가져온다.
 from app.config import settings
@@ -23,6 +26,36 @@ _client = (
     if settings.anthropic_api_key
     else anthropic.Anthropic()
 )
+
+logger = logging.getLogger("app.ai")
+
+
+class AIProviderError(Exception):
+    """사용자 키로 AI 회사 API를 호출하다 실패했을 때 쓰는 일반화된 예외.
+    원본 예외(메시지에 키 일부가 들어 있을 수 있음)는 일부러 붙이지 않고, 상태 코드/에러 코드/한국어 안내만 가진다."""
+
+    def __init__(self, status_code: int, error_code: str, detail: str):
+        super().__init__(detail)
+        self.status_code = status_code
+        self.error_code = error_code
+        self.detail = detail
+
+
+def _translate_error(exc: Exception) -> AIProviderError:
+    # 로그에는 예외 종류와 상태 코드만 남긴다. 예외 메시지·요청 헤더는 키가 섞일 수 있어 남기지 않는다.
+    status = getattr(exc, "status_code", None)
+    logger.warning("AI provider call failed: %s (status=%s)", type(exc).__name__, status)
+    message = str(exc).lower()
+    if isinstance(exc, (anthropic.AuthenticationError, anthropic.PermissionDeniedError, openai.AuthenticationError, openai.PermissionDeniedError)):
+        return AIProviderError(400, "AI_KEY_INVALID", "API 키를 확인해주세요. 키가 올바르지 않거나 사용 권한이 없어요.")
+    if isinstance(exc, (anthropic.RateLimitError, openai.RateLimitError)) or (
+        isinstance(exc, (anthropic.BadRequestError, openai.BadRequestError)) and ("credit" in message or "quota" in message or "billing" in message)
+    ):
+        return AIProviderError(429, "AI_QUOTA_EXCEEDED", "사용 한도를 확인해주세요. 잔액이 부족하거나 요청 한도를 넘었어요.")
+    if isinstance(exc, (anthropic.APIConnectionError, openai.APIConnectionError, anthropic.InternalServerError, openai.InternalServerError)):
+        return AIProviderError(503, "AI_UNAVAILABLE", "AI 서비스에 연결할 수 없어요. 잠시 후 다시 시도해주세요.")
+    return AIProviderError(502, "AI_MODEL_ERROR", "AI 모델 호출에 실패했어요. 모델 설정이나 요청 내용을 확인해주세요.")
+
 
 # SYSTEM_PROMPT: Claude에게 매 대화마다 공통으로 전달되는 "역할 지침".
 # 유저 메시지가 아니라 AI의 행동 방식을 정의하는 별도의 지시문으로, Claude API의
@@ -50,7 +83,13 @@ SYSTEM_PROMPT = (
 #   3) Claude API를 호출해서 응답을 받고, 응답 안의 텍스트 부분만 추출해서 반환한다.
 # 언제 쓰이나: routers/chat.py의 send_message에서, ChromaDB로 찾은 관련 청크(context_text)와
 #   대화방의 이전 메시지들(history)을 준비한 뒤 이 함수를 호출해서 실제 AI 답변을 얻는다.
-def ask(question: str, history: list[dict], context_text: str | None) -> str:
+def ask(
+    question: str,
+    history: list[dict],
+    context_text: str | None,
+    provider: str | None = None,
+    api_key: str | None = None,
+) -> str:
     # history(예: [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}])를
     # 복사해서 새 리스트를 만든다. 원본 리스트를 직접 수정하지 않기 위해 list(history)로 복사본을 만든다.
     messages = list(history)
@@ -73,17 +112,38 @@ def ask(question: str, history: list[dict], context_text: str | None) -> str:
     #   output_config={"effort": "medium"} — 답변 품질/속도/비용의 균형을 잡는 옵션.
     #     medium은 채팅처럼 응답 속도가 중요한 상황에 적절한 절충값이다.
     #   messages: 지금까지의 전체 대화 기록 + 이번 질문
-    response = _client.messages.create(
-        model=settings.claude_model,
-        max_tokens=4096,
-        system=SYSTEM_PROMPT,
-        output_config={"effort": "medium"},
-        messages=messages,
-    )
-    # Claude의 응답(response.content)은 여러 종류의 "블록"으로 구성될 수 있는데(텍스트 블록 등),
-    # 그중 block.type == "text"인 첫 번째 블록의 텍스트 내용만 꺼내서 반환한다.
-    # 만약 텍스트 블록이 하나도 없다면(이례적인 경우) 빈 문자열("")을 대신 반환한다.
-    return next((block.text for block in response.content if block.type == "text"), "")
+    if provider is None:
+        # 서버 키로 답하는 경로(ALLOW_SERVER_AI_KEY=true일 때만 chat.py가 이 경로로 들어온다).
+        response = _client.messages.create(
+            model=settings.claude_model,
+            max_tokens=4096,
+            system=SYSTEM_PROMPT,
+            output_config={"effort": "medium"},
+            messages=messages,
+        )
+        return next((block.text for block in response.content if block.type == "text"), "")
+
+    # 사용자 본인 키: 요청마다 클라이언트를 새로 만들어 쓰고, 어떤 예외든 키가 담기지 않은 AIProviderError로만 바꿔서 던진다.
+    try:
+        if provider == "claude":
+            client = anthropic.Anthropic(api_key=api_key, max_retries=0, timeout=60.0)
+            response = client.messages.create(
+                model=settings.claude_model,
+                max_tokens=4096,
+                system=SYSTEM_PROMPT,
+                output_config={"effort": "medium"},
+                messages=messages,
+            )
+            return next((block.text for block in response.content if block.type == "text"), "")
+        client = openai.OpenAI(api_key=api_key, max_retries=0, timeout=60.0)
+        response = client.chat.completions.create(
+            model=settings.openai_model,
+            max_completion_tokens=4096,
+            messages=[{"role": "system", "content": SYSTEM_PROMPT}, *messages],
+        )
+        return response.choices[0].message.content or ""
+    except (anthropic.APIError, openai.OpenAIError) as exc:
+        raise _translate_error(exc) from None
 
 
 # complete: ask()와 달리 "대화 기록"이나 "이전 문맥" 없이, 시스템 프롬프트 하나와 사용자

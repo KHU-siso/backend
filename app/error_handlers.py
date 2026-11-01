@@ -44,6 +44,8 @@ from sqlalchemy.exc import SQLAlchemyError
 # Starlette 내부에서 발생하는 HTTPException(404)까지 같은 포맷으로 통일해서 응답할 수 있다.
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from app.services.claude_service import AIProviderError
+
 # 이 파일 전용 로거. 아직 app 전체의 로깅 설정(포맷/레벨)은 되어 있지 않지만, logger.error(...)로
 # 남긴 로그는 파이썬 기본 설정으로도 stderr에 출력된다 (로깅 설정 자체는 이후 단계에서 정비한다).
 logger = logging.getLogger("app.errors")
@@ -99,6 +101,11 @@ def register_exception_handlers(app: FastAPI) -> None:
     #    그 하위 클래스 전부가 여기서 잡힌다). 유저에게는 원인을 구분해서 알려주지 않고 "일시적으로
     #    응답할 수 없다"는 안전한 메시지만 주고, 실제 원인(exc)은 서버 로그에만 남긴다.
     #    503 Service Unavailable: 서버 자체가 아니라 "외부 서비스(Claude)"가 일시적으로 문제라는 의미.
+    @app.exception_handler(AIProviderError)
+    async def ai_provider_exception_handler(request: Request, exc: AIProviderError) -> JSONResponse:
+        # 사용자 키 호출 실패: 이미 키가 제거된 일반화 메시지만 응답한다. (로그는 claude_service에서 종류/상태만 남김)
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail, "error_code": exc.error_code})
+
     @app.exception_handler(anthropic.APIError)
     async def claude_api_exception_handler(request: Request, exc: anthropic.APIError) -> JSONResponse:
         logger.error(

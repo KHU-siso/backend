@@ -40,6 +40,11 @@ class Settings(BaseSettings):
     # 챗봇 답변 생성에 사용할 Claude 모델 이름. 기본값으로 claude-opus-5를 사용한다.
     claude_model: str = "claude-opus-5"
 
+    # 사용자가 본인 API 키로 쓰는 OpenAI(GPT) 채팅 모델. 저렴한 모델을 기본값으로 둔다.
+    openai_model: str = "gpt-4o-mini"
+    # 사용자 키 헤더(X-AI-Key)가 없을 때 서버 키로 대신 답할지 여부. 기본 false(시연 중 비상 우회용으로만 true).
+    allow_server_ai_key: bool = False
+
     # 업로드된 PDF 원본 파일을 저장할 로컬 폴더 경로.
     upload_dir: str = "uploads"
     # ChromaDB(벡터 검색 DB)가 데이터를 저장할 로컬 폴더 경로.
