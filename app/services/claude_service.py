@@ -57,6 +57,45 @@ def _translate_error(exc: Exception) -> AIProviderError:
     return AIProviderError(502, "AI_MODEL_ERROR", "AI 모델 호출에 실패했어요. 모델 설정이나 요청 내용을 확인해주세요.")
 
 
+def resolve_ai_key(x_ai_provider: str | None, x_ai_key: str | None) -> tuple[str | None, str | None]:
+    """X-AI-Provider / X-AI-Key 헤더 값을 (provider, api_key)로 정리한다. 채팅·퀴즈 라우트가 같이 쓴다.
+    키가 있으면 provider가 claude/openai인지 검사(아니면 AI_PROVIDER_INVALID), 키가 없으면 ALLOW_SERVER_AI_KEY=true일 때만
+    (None, None)=서버 키 사용, 아니면 AI_KEY_REQUIRED(400). 키는 반환값 외에 어디에도 남기지 않는다."""
+    provider = (x_ai_provider or "").strip().lower() or None
+    api_key = (x_ai_key or "").strip() or None
+    if api_key:
+        if provider not in ("claude", "openai"):
+            raise AIProviderError(400, "AI_PROVIDER_INVALID", "지원하지 않는 AI 종류예요. Claude 또는 GPT를 선택해주세요.")
+        return provider, api_key
+    if settings.allow_server_ai_key:
+        return None, None  # 비상 우회: 서버 키로 답한다
+    raise AIProviderError(400, "AI_KEY_REQUIRED", "API 키를 입력해주세요.")
+
+
+def _call_with_user_key(provider: str, api_key: str, system_prompt: str, messages: list[dict], max_tokens: int) -> str:
+    """사용자 본인 키: 요청마다 클라이언트를 새로 만들어 쓰고, 어떤 예외든 키가 담기지 않은 AIProviderError로만 바꿔서 던진다."""
+    try:
+        if provider == "claude":
+            client = anthropic.Anthropic(api_key=api_key, max_retries=0, timeout=60.0)
+            response = client.messages.create(
+                model=settings.claude_model,
+                max_tokens=max_tokens,
+                system=system_prompt,
+                output_config={"effort": "medium"},
+                messages=messages,
+            )
+            return next((block.text for block in response.content if block.type == "text"), "")
+        client = openai.OpenAI(api_key=api_key, max_retries=0, timeout=60.0)
+        response = client.chat.completions.create(
+            model=settings.openai_model,
+            max_completion_tokens=max_tokens,
+            messages=[{"role": "system", "content": system_prompt}, *messages],
+        )
+        return response.choices[0].message.content or ""
+    except (anthropic.APIError, openai.OpenAIError) as exc:
+        raise _translate_error(exc) from None
+
+
 # SYSTEM_PROMPT: Claude에게 매 대화마다 공통으로 전달되는 "역할 지침".
 # 유저 메시지가 아니라 AI의 행동 방식을 정의하는 별도의 지시문으로, Claude API의
 # system 파라미터로 전달된다(아래 ask 함수 참고).
@@ -123,27 +162,7 @@ def ask(
         )
         return next((block.text for block in response.content if block.type == "text"), "")
 
-    # 사용자 본인 키: 요청마다 클라이언트를 새로 만들어 쓰고, 어떤 예외든 키가 담기지 않은 AIProviderError로만 바꿔서 던진다.
-    try:
-        if provider == "claude":
-            client = anthropic.Anthropic(api_key=api_key, max_retries=0, timeout=60.0)
-            response = client.messages.create(
-                model=settings.claude_model,
-                max_tokens=4096,
-                system=SYSTEM_PROMPT,
-                output_config={"effort": "medium"},
-                messages=messages,
-            )
-            return next((block.text for block in response.content if block.type == "text"), "")
-        client = openai.OpenAI(api_key=api_key, max_retries=0, timeout=60.0)
-        response = client.chat.completions.create(
-            model=settings.openai_model,
-            max_completion_tokens=4096,
-            messages=[{"role": "system", "content": SYSTEM_PROMPT}, *messages],
-        )
-        return response.choices[0].message.content or ""
-    except (anthropic.APIError, openai.OpenAIError) as exc:
-        raise _translate_error(exc) from None
+    return _call_with_user_key(provider, api_key, SYSTEM_PROMPT, messages, 4096)
 
 
 # complete: ask()와 달리 "대화 기록"이나 "이전 문맥" 없이, 시스템 프롬프트 하나와 사용자
@@ -153,7 +172,11 @@ def ask(
 # 무슨 기능을 하나: "질문 하나 → 답 하나"로 끝나는, 챗봇이 아닌 작업(퀴즈 문제 생성, 주관식 채점처럼
 #   대화가 아니라 한 번의 요청-응답으로 충분한 작업)에 Claude를 재사용할 수 있게 해준다.
 # 언제 쓰이나: services/quiz_service.py의 generate_quiz_questions/grade_answer에서 호출된다.
-def complete(system_prompt: str, user_message: str, max_tokens: int = 4096) -> str:
+def complete(system_prompt: str, user_message: str, max_tokens: int = 4096, provider: str | None = None, api_key: str | None = None) -> str:
+    # provider가 있으면 ask()와 같은 사용자 키 경로(요청마다 클라이언트, max_retries=0, AIProviderError 변환)로 호출한다.
+    # provider가 None이면 서버 키(_client)로 호출한다 (ALLOW_SERVER_AI_KEY=true 경로, 빈 시간 알림 메일).
+    if provider is not None:
+        return _call_with_user_key(provider, api_key, system_prompt, [{"role": "user", "content": user_message}], max_tokens)
     response = _client.messages.create(
         model=settings.claude_model,
         max_tokens=max_tokens,

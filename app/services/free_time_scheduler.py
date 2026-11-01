@@ -2,7 +2,10 @@
 # 빈 시간 학습 알림
 # -----------------------------------------------------------------------------
 # 마이페이지에서 "빈 시간 학습 알림"을 켠 사용자에게, 오늘/내일 시간표(수업 + 일정 + 시험)의 빈 시간이
-# 시작되기 10분 전에 "공부할 시간이에요" 메일을 보낸다. 그 과목에 올린 PDF가 있으면 기존 퀴즈 생성 로직
+# 시작되기 10분 전에 "공부할 시간이에요" 메일을 보낸다. 미완료 과제(user_states('subjects').assignments 중
+# completed 아님 + 마감 전, deadline_scheduler.open_assignments 재사용)가 있으면 마감 임박 순으로 슬롯마다 하나씩
+# 배정해 맨 위에 안내한다(그날 이미 안내한 과제는 kind="free_time_task" 로그로 피하고, 모자라면 가장 급한 과제를 다시 쓴다).
+# 마감이 오늘이거나 24시간 안이면 "급한 과제". 그 아래에 PDF가 있으면 기존 퀴즈 생성 로직
 # (quiz_service.generate_quiz_questions)으로 만든 짧은 퀴즈 1~3개를 함께 넣고, 자료가 없으면 알림만 보낸다.
 #
 # 데이터 위치(전부 기존 저장소 재사용 — DB 스키마 변경 없음)
@@ -32,12 +35,14 @@ from app.services.email_service import email_configured, send_study_reminder_ema
 logger = logging.getLogger("app.free_time")
 
 KIND = "free_time_study"
+KIND_TASK = "free_time_task"  # 그날 어떤 과제를 안내했는지 (assignment_id="YYYY-MM-DD:과제id"). 같은 날 같은 과제 반복 방지용
 SEOUL = ZoneInfo("Asia/Seoul")
 DAY_START = 8 * 60  # 08:00
 DAY_END = 22 * 60  # 22:00
 MIN_SLOT_MINUTES = 30  # 이보다 짧은 빈 시간은 알리지 않는다
 EXAM_MINUTES = 60  # 프론트 시간표가 시험을 1시간 블록으로 그리는 것과 같다
 MAX_QUIZ = 3
+URGENT_WINDOW = timedelta(hours=24)  # 마감이 오늘이거나 24시간 안이면 "급한 과제"
 
 
 # ---------- 빈 시간 계산 (순수 함수) ----------
@@ -140,25 +145,72 @@ def _today_count(db, user_id: int, now_seoul: datetime) -> int:
     ).scalar_one()
 
 
-def _claim(db, user_id: int, slot_key: str) -> bool:
+def _claim(db, user_id: int, slot_key: str, kind: str = KIND) -> bool:
     result = db.execute(
         pg_insert(EmailNotificationLog)
-        .values(user_id=user_id, assignment_id=slot_key, kind=KIND)
+        .values(user_id=user_id, assignment_id=slot_key, kind=kind)
         .on_conflict_do_nothing(constraint="uq_email_notification_logs_user_assignment_kind")
     )
     db.commit()
     return result.rowcount == 1
 
 
-def _release(db, user_id: int, slot_key: str) -> None:
+def _release(db, user_id: int, slot_key: str, kind: str = KIND) -> None:
     db.execute(
         delete(EmailNotificationLog).where(
             EmailNotificationLog.user_id == user_id,
             EmailNotificationLog.assignment_id == slot_key,
-            EmailNotificationLog.kind == KIND,
+            EmailNotificationLog.kind == kind,
         )
     )
     db.commit()
+
+
+# ---------- 과제 배정 ----------
+
+def _task_key(day: date, task_id) -> str:
+    return f"{day.isoformat()}:{task_id}"[:64]
+
+
+def _used_task_ids(db, user_id: int, day: date) -> set[str]:
+    """그날 이미 빈 시간 알림에 쓴 과제 키 (_task_key 형식)."""
+    rows = db.execute(
+        select(EmailNotificationLog.assignment_id).where(
+            EmailNotificationLog.user_id == user_id,
+            EmailNotificationLog.kind == KIND_TASK,
+            EmailNotificationLog.assignment_id.like(f"{day.isoformat()}:%"),
+        )
+    ).scalars()
+    return set(rows)
+
+
+def pick_assignment(candidates: list[tuple[dict, datetime]], used_keys: set[str], day: date) -> tuple[dict, datetime] | None:
+    """마감 임박 순 후보 중 그날 아직 안 쓴 첫 과제. 전부 썼으면(과제가 슬롯보다 적을 때) 마감이 가장 가까운 과제를 다시 쓴다."""
+    for task, deadline in candidates:
+        if _task_key(day, task["id"]) not in used_keys:
+            return task, deadline
+    return candidates[0] if candidates else None
+
+
+def remaining_text(deadline: datetime, now: datetime) -> str:
+    deadline_s, now_s = deadline.astimezone(SEOUL), now.astimezone(SEOUL)
+    if deadline_s.date() == now_s.date():
+        return "오늘 마감"
+    if deadline_s - now_s <= URGENT_WINDOW:
+        return f"{max(1, -(-int((deadline_s - now_s).total_seconds()) // 3600))}시간 남음"
+    return f"{(deadline_s.date() - now_s.date()).days}일 남음"
+
+
+def assignment_info(task: dict, deadline: datetime, names: dict, now: datetime) -> dict:
+    """메일에 넣을 과제 정보. 마감이 오늘이거나 24시간 안이면 urgent."""
+    deadline_s = deadline.astimezone(SEOUL)
+    return {
+        "title": str(task.get("title") or "과제"),
+        "subject_name": names.get(task.get("subjectId")) or "과목",
+        "deadline_text": deadline_s.strftime("%Y-%m-%d %H:%M") if task.get("time") else deadline_s.strftime("%Y-%m-%d") + " 하루 종일",
+        "remaining_text": remaining_text(deadline, now),
+        "urgent": deadline_s.date() == now.astimezone(SEOUL).date() or deadline - now <= URGENT_WINDOW,
+    }
 
 
 # ---------- 퀴즈 (기존 퀴즈 생성 로직 재사용) ----------
@@ -225,6 +277,8 @@ def run_once(now: datetime | None = None) -> int:
     if not email_configured():
         logger.info("빈 시간 알림 건너뜀: EMAIL_ENABLED/SMTP_USER/SMTP_PASSWORD가 설정되지 않음")
         return 0
+    from app.services.deadline_scheduler import open_assignments  # 순환 import 방지: deadline_scheduler가 이 모듈을 import 한다
+
     now = now or datetime.now(timezone.utc)
     now_seoul = now.astimezone(SEOUL)
     today = now_seoul.date()
@@ -244,10 +298,20 @@ def run_once(now: datetime | None = None) -> int:
                         slot_key = f"{day.isoformat()}T{_hhmm(start)}"
                         if not _claim(db, user_id, slot_key):
                             continue  # 이미 보냈거나 다른 서버가 먼저 가져갔다
+                        task_key, task_claimed = "", False
                         try:
                             if _today_count(db, user_id, now_seoul) > limit:  # 동시에 마지막 자리를 잡은 경우
                                 _release(db, user_id, slot_key)
                                 raise _LimitReached
+                            # 이 슬롯 시작 전에 마감인 과제는 제외하고, 마감 임박 순으로 하나 배정한다
+                            candidates = [(t, d) for t, d in open_assignments(data, now) if d > slot_start]
+                            chosen = pick_assignment(candidates, _used_task_ids(db, user_id, day), day)
+                            assignment = None
+                            if chosen:
+                                names = {s.get("id"): s.get("name", "") for s in data.get("subjects", []) if isinstance(s, dict)}
+                                assignment = assignment_info(chosen[0], chosen[1], names, now)
+                                task_key = _task_key(day, chosen[0]["id"])
+                                task_claimed = _claim(db, user_id, task_key, KIND_TASK)
                             picked = _pick_document(db, user_id, data, today)
                             quiz = _make_quiz(picked[0]) if picked else []
                             ok = send_study_reminder_email(
@@ -256,17 +320,22 @@ def run_once(now: datetime | None = None) -> int:
                                 slot_text=f"{_hhmm(start)} ~ {_hhmm(end)}",
                                 subject_name=picked[1] if picked and quiz else "",
                                 quiz=quiz,
+                                assignment=assignment,
                             )
                         except _LimitReached:
                             raise
                         except Exception:
                             logger.exception("빈 시간 알림 처리 중 오류: user_id=%s, slot=%s", user_id, slot_key)
                             db.rollback()
+                            if task_claimed:
+                                _release(db, user_id, task_key, KIND_TASK)
                             _release(db, user_id, slot_key)
                             continue
                         if ok:
                             sent += 1
                         else:
+                            if task_claimed:
+                                _release(db, user_id, task_key, KIND_TASK)
                             _release(db, user_id, slot_key)
             except _LimitReached:
                 continue  # 이 사용자는 오늘 한도 도달

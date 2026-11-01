@@ -45,6 +45,20 @@ def _deadline_at(task: dict) -> datetime | None:
         return None
 
 
+def open_assignments(data: dict, now: datetime) -> list[tuple[dict, datetime]]:
+    """아직 끝나지 않았고 마감이 지나지 않은 과제를 (과제, 마감 시각) 목록으로, 마감 임박 순으로 돌려준다.
+    run_once()와 같은 기준(최상위 data['assignments'], completed, id, _deadline_at)을 쓴다. 빈 시간 알림이 재사용한다."""
+    found = []
+    for task in data.get("assignments", []):
+        if not isinstance(task, dict) or task.get("completed") or not task.get("id"):
+            continue
+        deadline = _deadline_at(task)
+        if deadline is not None and deadline > now:
+            found.append((task, deadline))
+    found.sort(key=lambda pair: pair[1])
+    return found
+
+
 def _remaining_text(deadline: datetime, now: datetime) -> str:
     """메일에 쓰는 남은 시간 문구. 알림 조건이 24시간 이내라 시간 단위로만 표현한다."""
     minutes = int((deadline - now).total_seconds() // 60)

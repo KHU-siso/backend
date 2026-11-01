@@ -37,7 +37,7 @@ from app.schemas import (
     SubjectConversationCreate,
 )
 # services/claude_service.py: 실제 Claude API 호출 함수
-from app.services.claude_service import AIProviderError, ask
+from app.services.claude_service import ask, resolve_ai_key
 # services/embedding_service.py: 텍스트를 벡터로 변환하는 함수 (질문을 검색용 벡터로 바꿀 때 사용)
 from app.services.embedding_service import embed_text
 # services/note_context_service.py: 이 과목에 내가 쓴 학습 노트를 채팅 근거로 가져오는 함수
@@ -225,15 +225,7 @@ def send_message(
     x_ai_key: str | None = Header(default=None),
 ):
     # 사용자 본인의 AI 키(헤더). 이 값은 AI 호출에만 쓰고 DB·로그·응답 어디에도 남기지 않는다.
-    provider = (x_ai_provider or "").strip().lower() or None
-    api_key = (x_ai_key or "").strip() or None
-    if api_key:
-        if provider not in ("claude", "openai"):
-            raise AIProviderError(400, "AI_PROVIDER_INVALID", "지원하지 않는 AI 종류예요. Claude 또는 GPT를 선택해주세요.")
-    elif settings.allow_server_ai_key:
-        provider = api_key = None  # 비상 우회: 서버 키로 답한다
-    else:
-        raise AIProviderError(400, "AI_KEY_REQUIRED", "API 키를 입력해주세요.")
+    provider, api_key = resolve_ai_key(x_ai_provider, x_ai_key)
 
     conversation = _get_owned_conversation(db, conversation_id, current_user.id)
 

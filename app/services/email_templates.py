@@ -98,16 +98,34 @@ def deadline_email_html(user_name: str, subject_name: str, assignment_title: str
     return _shell(body, f"{assignment_title} · {remaining}")
 
 
-def study_reminder_email_html(user_name: str, slot_text: str, subject_name: str, quiz: list[dict]) -> str:
-    """빈 시간 학습 알림: '공부할 시간이에요' + (자료가 있으면) 짧은 퀴즈 1~3개. 정답·해설은 맨 아래에 모아 둔다."""
+def study_reminder_email_html(user_name: str, slot_text: str, subject_name: str, quiz: list[dict], assignment: dict | None = None) -> str:
+    """빈 시간 학습 알림: (미완료 과제가 있으면) 과제 안내 → (자료가 있으면) 짧은 퀴즈 1~3개. 정답·해설은 맨 아래에 모아 둔다.
+    assignment: {"title", "subject_name", "deadline_text", "remaining_text", "urgent"}"""
+    if assignment:
+        lead = f"지금 비는 시간({escape(slot_text)})에 이 과제를 해보세요"
+        task_section = _section(
+            "급한 과제" if assignment.get("urgent") else "이 과제를 해보세요",
+            _card(
+                "icon_task",
+                assignment["title"],
+                f"{assignment['subject_name']} · {assignment['remaining_text']} (마감 {assignment['deadline_text']})",
+                "과제 확인하기",
+                APP_URL,
+            ),
+        )
+        preheader = f"{slot_text} 이 과제를 해보세요: {assignment['title']} ({assignment['remaining_text']})"
+    else:
+        lead = f"지금부터 비어 있는 시간({escape(slot_text)})에 짧게 집중해 볼까요?"
+        task_section = _section("오늘의 학습 시간", _card("icon_clock", "빈 시간이 곧 시작돼요.", slot_text, "학습 시작하기", APP_URL))
+        preheader = f"{slot_text} 공부할 시간이에요"
     parts = [
         _header(),
         "<tr><td align=\"center\" style=\"padding:44px 24px 26px\">"
         f"<div style=\"font-size:22px;font-weight:800;color:#000;line-height:1.6\">{escape(user_name)} 님, 공부할 시간이에요.</div>"
-        f"<div style=\"font-size:14px;font-weight:700;color:#666;margin-top:22px\">지금부터 비어 있는 시간({escape(slot_text)})에 짧게 집중해 볼까요?</div>"
+        f"<div style=\"font-size:14px;font-weight:700;color:#666;margin-top:22px\">{lead}</div>"
         "</td></tr>",
         "<tr><td style=\"border-top:1px solid #d9dce3;font-size:0;line-height:0\">&nbsp;</td></tr>",
-        _section("오늘의 학습 시간", _card("icon_clock", "빈 시간이 곧 시작돼요.", slot_text, "학습 시작하기", APP_URL)),
+        task_section,
     ]
     if quiz:
         items = ""
@@ -133,7 +151,7 @@ def study_reminder_email_html(user_name: str, slot_text: str, subject_name: str,
         "이 알림은 MORAM 마이페이지의 '빈 시간 학습 알림'에서 끌 수 있어요.</td></tr>"
     )
     parts.append(_footer())
-    return _shell("".join(parts), f"{slot_text} 공부할 시간이에요")
+    return _shell("".join(parts), preheader)
 
 
 def verification_email_html(code: str, expire_minutes: int) -> str:

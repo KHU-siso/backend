@@ -56,7 +56,7 @@ MAX_CONTEXT_CHARS = 20000
 # 무슨 기능을 하나: 청크들을 이어붙여 컨텍스트로 만들고, quiz_type에 맞는 형식을 지정해
 #   Claude에게 문제 생성을 요청한 뒤, 응답 텍스트를 JSON 배열로 파싱해서 반환한다.
 # 언제 쓰이나: routers/quiz.py의 POST /api/quiz/generate에서 호출된다.
-def generate_quiz_questions(document_id: int, quiz_type: str, num_questions: int = 10) -> list[dict]:
+def generate_quiz_questions(document_id: int, quiz_type: str, num_questions: int = 10, provider: str | None = None, api_key: str | None = None) -> list[dict]:
     collection = get_chunk_collection()
     results = collection.get(where={"document_id": document_id})
     chunks = results.get("documents") or []
@@ -84,7 +84,7 @@ def generate_quiz_questions(document_id: int, quiz_type: str, num_questions: int
         f"응답은 이 문제들을 담은 JSON 배열 하나뿐이어야 하며, 그 외의 설명이나 코드블록 표시는 붙이지 마."
     )
 
-    raw = complete(QUIZ_SYSTEM_PROMPT, user_message, max_tokens=4096)
+    raw = complete(QUIZ_SYSTEM_PROMPT, user_message, max_tokens=4096, provider=provider, api_key=api_key)
     questions = _parse_json_array(raw)
     # Claude가 개수를 정확히 안 지켰을 경우를 대비해, 요청한 개수만큼만 사용한다
     # (부족하면 있는 만큼만 반환 — routers/quiz.py에서 그 개수를 total_questions로 저장한다).

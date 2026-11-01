@@ -16,7 +16,7 @@
 # =============================================================================
 
 # FastAPI에서 가져옴 — 라우터 등록, 의존성 주입, 에러 응답
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, status
 # SQLAlchemy의 func — MAX() 같은 집계 함수를 파이썬 코드에서 쓸 수 있게 해줌
 from sqlalchemy import func, select
 # SQLAlchemy ORM 세션 타입
@@ -38,6 +38,7 @@ from app.schemas import (
 )
 # services/coin_service.py: 퀴즈 결과에 따른 코인 지급 (LOW_SCORE_THRESHOLD는 "재도전 선택지"
 # 문구를 다시 보여줄지 판단할 때도 재사용한다)
+from app.services.claude_service import resolve_ai_key
 from app.services.coin_service import LOW_SCORE_THRESHOLD, calculate_quiz_reward
 # services/quiz_service.py: 퀴즈 생성(Claude 호출 + ChromaDB 조회), 채점 로직
 from app.services.quiz_service import generate_quiz_questions, grade_answer
@@ -60,13 +61,18 @@ def generate_quiz(
     payload: QuizGenerateRequest,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
+    x_ai_provider: str | None = Header(default=None),
+    x_ai_key: str | None = Header(default=None),
 ):
+    # 사용자 본인의 AI 키(헤더). AI 호출에만 쓰고 DB·로그·응답 어디에도 남기지 않는다. (채팅 send_message와 같은 규칙)
+    provider, api_key = resolve_ai_key(x_ai_provider, x_ai_key)
+
     document = db.get(Document, payload.document_id)
     if document is None or document.user_id != current_user.id:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Document not found")
 
     try:
-        questions_data = generate_quiz_questions(document.id, payload.quiz_type, TOTAL_QUESTIONS)
+        questions_data = generate_quiz_questions(document.id, payload.quiz_type, TOTAL_QUESTIONS, provider=provider, api_key=api_key)
     except ValueError as exc:
         # 문서에 청크가 없거나 Claude 응답을 파싱하지 못한 경우 등, 우리 쪽 요청이 아니라
         # "지금은 퀴즈를 만들 수 없는 상황"이므로 502(Bad Gateway 성격)로 응답한다.
@@ -74,30 +80,35 @@ def generate_quiz(
     if not questions_data:
         raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="퀴즈 문제를 생성하지 못했습니다")
 
-    quiz_set = QuizSet(
-        user_id=current_user.id,
-        document_id=document.id,
-        quiz_type=payload.quiz_type,
-        total_questions=len(questions_data),
-    )
-    db.add(quiz_set)
-    # db.flush(): documents.py의 upload_document와 동일한 이유로, 아래에서 QuizQuestion을
-    # 만들 때 필요한 quiz_set.id를 commit 전에 미리 확보한다.
-    db.flush()
-
-    for index, question in enumerate(questions_data, start=1):
-        db.add(
-            QuizQuestion(
-                quiz_set_id=quiz_set.id,
-                question_index=index,
-                question_text=question.get("question", ""),
-                options=question.get("options"),
-                correct_answer=question.get("correct_answer", ""),
-                explanation=question.get("explanation", ""),
-            )
+    # AI 호출은 위에서 이미 끝났다. 저장 중 어떤 오류가 나도 세트가 반쯤 남지 않게 통째로 되돌린다.
+    try:
+        quiz_set = QuizSet(
+            user_id=current_user.id,
+            document_id=document.id,
+            quiz_type=payload.quiz_type,
+            total_questions=len(questions_data),
         )
-    db.commit()
-    db.refresh(quiz_set)
+        db.add(quiz_set)
+        # db.flush(): documents.py의 upload_document와 동일한 이유로, 아래에서 QuizQuestion을
+        # 만들 때 필요한 quiz_set.id를 commit 전에 미리 확보한다.
+        db.flush()
+
+        for index, question in enumerate(questions_data, start=1):
+            db.add(
+                QuizQuestion(
+                    quiz_set_id=quiz_set.id,
+                    question_index=index,
+                    question_text=question.get("question", ""),
+                    options=question.get("options"),
+                    correct_answer=question.get("correct_answer", ""),
+                    explanation=question.get("explanation", ""),
+                )
+            )
+        db.commit()
+        db.refresh(quiz_set)
+    except Exception:
+        db.rollback()
+        raise
     return quiz_set
 
 
