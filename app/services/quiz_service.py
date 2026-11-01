@@ -15,6 +15,7 @@
 
 # 파이썬 표준 라이브러리 — Claude가 돌려준 텍스트를 JSON으로 해석할 때 사용
 import json
+import random
 
 # services/claude_service.py의 complete(): 대화 기록 없이 "시스템 프롬프트 + 사용자 메시지"
 # 하나로 Claude를 한 번 호출하는 범용 함수. ask()는 챗봇 대화용이라 여기서는 쓰지 않는다.
@@ -86,6 +87,13 @@ def generate_quiz_questions(document_id: int, quiz_type: str, num_questions: int
 
     raw = complete(QUIZ_SYSTEM_PROMPT, user_message, max_tokens=4096, provider=provider, api_key=api_key)
     questions = _parse_json_array(raw)
+    # Claude는 정답을 보기 1번에 두는 경향이 있어, 서버에서 보기 순서를 무작위로 섞는다
+    # (정답은 문자열로 저장되므로 순서가 바뀌어도 채점에 영향 없음 → 정답 위치가 1~4번 각 25%).
+    if quiz_type == "객관식":
+        for q in questions:
+            opts = q.get("options")
+            if isinstance(opts, list):
+                random.shuffle(opts)
     # Claude가 개수를 정확히 안 지켰을 경우를 대비해, 요청한 개수만큼만 사용한다
     # (부족하면 있는 만큼만 반환 — routers/quiz.py에서 그 개수를 total_questions로 저장한다).
     return questions[:num_questions]
